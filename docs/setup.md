@@ -73,14 +73,18 @@ python3 hardware/tools/hybrid_control.py --host BOARD_IP status
 
 确认 USB 已就绪，Mac 已收到手机画面。先在无敏感操作的页面验证一处点击、拖动与返回手势，再进入实际任务。固件仍保留旧 BLE/App 控制功能，不要同时运行两个控制者；旧客户端也不会自动改用绝对坐标。
 
-## 接口与中文输入
+## 整段中文输入（推荐）
+
+安装并启用 AirType 键盘后，可从 Mac 经局域网直接向当前输入框发送中文，不必切换应用或逐词选择拼音候选。固件不用重新刷写。具体设置、客户端命令、配对码变化及失败恢复见 [中文输入指南](chinese-input.md)。此功能需要额外安装手机键盘；基础点击和 HID ASCII 输入不需要。
+
+## 板子接口与备用输入
 
 板子监听 HTTP 8766；`GET /status`、`POST /command` 都要求 Bearer Token。客户端默认从本地 `hardware/hid_bridge/secrets.h` 读取 Token。不使用代理。HTTP 是明文，只用于可信局域网，不要映射公网端口。
 
 - `tap` / `move`：两个截图像素坐标，必须同时给 `--width`、`--height`。
 - `swipe`：起止四个坐标，`--ms` 范围 60–2000 ms。同一点拖动可测试长按。
 - 原始指令 `absmove X Y`、`abstap X Y`、`absdrag X1 Y1 X2 Y2 MS` 使用 0–32767 HID 坐标。
-- `command 'type ...'` 是 ASCII 键盘输入，不是 Unicode 粘贴。中文需启用简体拼音全键盘，发送拼音后观察并点击正确候选词。
+- `command 'type ...'` 是 ASCII 键盘输入，不是 Unicode 粘贴。中文优先使用 AirType；无法使用时才启用简体拼音全键盘，发送拼音后观察并点击正确候选词。
 - 固件会 trim 命令末尾空白，不能依赖 `type` 尾部空格提交拼音；可单独发送 `command 'key space'` 或点击候选词。
 - 消费者 Home 键没有在测试手机上生效。可从截图底部向上拖动返回桌面；坐标需按实际截图选择。
 

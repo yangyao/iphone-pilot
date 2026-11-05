@@ -23,6 +23,8 @@ https://github.com/xhoantran/iphone-use was studied as a reference for agent-dri
 
 ## Build dependencies
 
+AirType (invivo, App Store ID `922932291`) is an optional separately installed third-party iOS keyboard for direct LAN text insertion. No AirType app, binary or source is redistributed. `tools/airtype.py` is an independent standard-library client based on the HTTP requests observed in its served web interface, tested with version 1.1. This project is not affiliated with its developer. See `docs/chinese-input.md` for permissions and limitations.
+
 Arduino ESP32 core (tested 3.3.2), NimBLE-Arduino (tested 2.5.1), GStreamer and other UxPlay dependencies retain their own licenses. Install them from their upstream distributions. This source repository does not bundle their SDKs or binaries.
 
 New project contributions: Copyright (c) 2026 yangyao, GPL-3.0. Existing notices and separately granted MIT permissions remain intact.
