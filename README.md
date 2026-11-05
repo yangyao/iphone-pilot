@@ -1,4 +1,4 @@
-<h1 align="center">iPhone Mac Controller</h1>
+<h1 align="center">iPhone Pilot</h1>
 
 <p align="center"><strong>把 iPhone 画面投到 Mac，用 ESP32 遥控真实手机。</strong></p>
 
@@ -6,7 +6,7 @@
   <a href="#开始使用">开始使用</a> ·
   <a href="docs/setup.md">安装与刷机</a> ·
   <a href="docs/validation.md">实测与限制</a> ·
-  <a href="https://github.com/yangyao/iphone-mac-controller/issues">反馈问题</a>
+  <a href="https://github.com/yangyao/iphone-pilot/issues">反馈问题</a>
 </p>
 
 iPhone 通过 AirPlay 把画面直接传给 Mac，Mac 持续缓存最新截图。人或 AI Agent 根据截图发出点击、滑动和键盘指令，ESP32 再通过 USB 操作手机。无需在 iPhone 安装配套控制 App。
