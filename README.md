@@ -1,6 +1,6 @@
 <h1 align="center">iPhone Pilot</h1>
 
-<p align="center"><strong>把 iPhone 画面投到 Mac，用 ESP32 遥控真实手机。</strong></p>
+<p align="center"><strong>让 Agent 用上你的 iPhone。</strong></p>
 
 <p align="center">
   <a href="#开始使用">开始使用</a> ·
@@ -9,13 +9,27 @@
   <a href="https://github.com/yangyao/iphone-pilot/issues">反馈问题</a>
 </p>
 
-iPhone 通过 AirPlay 把画面直接传给 Mac，Mac 持续缓存最新截图。人或 AI Agent 根据截图发出点击、滑动和键盘指令，ESP32 再通过 USB 操作手机。无需在 iPhone 安装配套控制 App。
+你每天使用的 App、熟悉的界面和已经登录的账号，都在手机里。把任务交给 Agent 时，这些事情往往还需要你拿起手机，亲手完成最后几步。
 
-**直接投屏到 Mac · 绝对坐标点击 · USB 鼠标与键盘 · 可复用 Agent Skill**
+iPhone Pilot 想让 Agent 也能用上这台手机。连接一块小板子，把画面投到 Mac，Agent 就能看着真实屏幕，点击、滑动、输入，再查看操作结果，在你授权的范围内完成任务。
 
-当前是经过一台真实 iPhone 验证的实验版本，尚未建立完整机型兼容表，也没有可直接下载的通用固件。请先阅读[实测与限制](docs/validation.md)。
+你交代任务，它在手机上接着做。
 
-## 板子就是一个遥控器
+## 把手机里的事情，交给 Agent 接着做
+
+比如打开购物 App，找到买家向你提出的问题，根据你提供的使用体验写好回答，再提交并确认结果。我们已经用这套方式，在真实 iPhone 上走完了一次京东买家问答流程。
+
+Agent 使用的是手机上现有的 App 和页面。你决定要做什么、提供必要的信息，它通过观察屏幕来执行。以这次问答为例，你提供实际使用感受，Agent 负责找到问题、输入回答并核对发布结果。
+
+## 看得见，也操作得上
+
+要让 Agent 用好手机，需要把“看见画面、执行动作、确认结果”连起来。
+
+iPhone Pilot 持续把手机画面送到 Mac，让 Agent 随时读取最新截图；点击使用截图上的位置，减少反复校准相对鼠标；每次页面切换或提交之后，再观察结果，决定下一步。
+
+仓库也提供了可复用的操作 Skill，记录中文输入、候选词选择和操作失败后的处理经验。换一个 Agent 时，可以把这些已经走过的经验一起交给它。
+
+## 一块小板子，接上 Agent 的手
 
 可以把 ESP32 理解为插在手机上的鼠标和键盘。它不运行大模型，不负责理解画面；Mac 上的 Agent 负责观察和决策，板子负责执行输入。
 
@@ -29,27 +43,7 @@ flowchart LR
 
 画面和指令走两条通路：**画面直接到 Mac，控制经 Wi-Fi 到板子，再经 USB 到手机**。这条路径不依赖蓝牙配对，但板子仍需通过支持数据的 USB 连接 iPhone；只给板子供电不能完成这里的 USB 控制。
 
-## 按截图坐标点击，减少反复校准
-
-固件在原有相对鼠标、键盘功能旁加入绝对坐标指针。客户端把截图像素换算为 HID 坐标，再发送点击或拖动指令。在本次实测中，打开设置、返回、列表滚动和京东问答提交均不需要重新校准相对鼠标。
-
-这仍然是 iOS 辅助触控下的 HID 指针输入，并非直接注入触摸事件。机型、系统设置、画面方向和裁剪可能影响坐标对应关系；首次使用必须观察点击效果。
-
-## 让 Agent 持续看见画面
-
-接收程序保持一个 UxPlay 进程，持续更新 `runtime/latest.jpg`，并提供仅监听本机的状态接口。Agent 不必为每一张截图重新启动命令。
-
-```sh
-python3 receiver.py --directory runtime -- python3 uxplay_source.py
-```
-
-在 iPhone 的“屏幕镜像”中选择 **iPhone Agent Mac**，然后查看：
-
-```sh
-curl -s http://127.0.0.1:18765/status
-```
-
-`file` 是最新截图路径，`sequence` 是接收帧编号。帧到达时间不等于端到端延迟；即使截图在更新，也要确认实际页面是否随操作变化。
+无需在 iPhone 安装配套控制 App。你需要一台 Mac、一块兼容的 ESP32-S3，以及把板子接到手机的数据连接。具体硬件要求见[安装与连接指南](docs/setup.md)。
 
 ## 开始使用
 
@@ -58,15 +52,7 @@ curl -s http://127.0.0.1:18765/status
 3. 将板子接到 iPhone，开启辅助触控；Mac、手机与板子连接同一个可信局域网。
 4. 启动接收程序，把 iPhone 镜像到 Mac，再从截图中取得坐标进行控制。
 
-```sh
-python3 hardware/tools/hybrid_control.py --host BOARD_IP status
-python3 hardware/tools/hybrid_control.py --host BOARD_IP tap 192 645 --width 498 --height 1080
-python3 hardware/tools/hybrid_control.py --host BOARD_IP swipe 250 855 250 420 --width 498 --height 1080 --ms 450
-python3 hardware/tools/hybrid_control.py --host BOARD_IP command 'key cmd+space'
-python3 hardware/tools/hybrid_control.py --host BOARD_IP command 'type 123'
-```
-
-示例坐标仅适用于当时的 498 × 1080 截图。实际操作必须使用自己的截图尺寸和目标位置。
+**[安装、刷机与命令示例 →](docs/setup.md)**
 
 ## 交给自己的 Agent
 
@@ -74,7 +60,9 @@ python3 hardware/tools/hybrid_control.py --host BOARD_IP command 'type 123'
 
 例如：“使用这个仓库的 iphone-mac-control，打开指定 App 并查看页面。每次导航后确认画面，提交操作按我授权的任务执行。”
 
-## 实测结果
+## 现在能做到哪一步
+
+当前是经过一台真实 iPhone 验证的实验版本。已经走通了观察、操作与提交的完整流程，还需要更多设备和长期使用的检验。没有可直接下载的通用固件，目前需要自行编译。
 
 | 功能 | 当前结果 |
 | --- | --- |
@@ -85,6 +73,10 @@ python3 hardware/tools/hybrid_control.py --host BOARD_IP command 'type 123'
 | 京东买家问答 | 完成一条中文回答，出现“发布成功” |
 | Consumer Home 专用按键 | 命令返回成功，但手机没有返回桌面 |
 | 全机型、长时间运行、旧 App/BLE 共存 | 尚未充分验证 |
+
+中文输入仍需要核对候选词，任务速度也会受 Agent 推理和观察轮次影响。绝对坐标使用的是 iOS 辅助触控指针；系统设置、画面方向和裁剪可能影响点击位置，首次连接需要验证。
+
+**[完整验证记录与已知限制 →](docs/validation.md)**
 
 ## 来源与许可证
 
