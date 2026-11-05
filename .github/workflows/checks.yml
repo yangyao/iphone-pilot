@@ -1,0 +1,16 @@
+name: Source checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest discover -s tests
+      - run: python -m py_compile receiver.py uxplay_source.py hardware/tools/hybrid_control.py
+      - run: bash -n hardware/build.sh
+      - run: c++ -std=c++17 -Wall -Wextra -fsanitize=address,undefined -Ihardware/tests/hybrid hardware/tests/hybrid/test_absolute.cpp -o /tmp/absolute-test && /tmp/absolute-test

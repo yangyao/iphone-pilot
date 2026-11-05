@@ -1,0 +1,13 @@
+runtime/
+__pycache__/
+*.pyc
+.DS_Store
+.venv/
+uxplay-src/
+hardware/build/
+hardware/hid_bridge/secrets.h
+*.bin
+*.elf
+*.map
+*.log
+backups/

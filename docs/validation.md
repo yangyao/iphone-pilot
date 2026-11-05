@@ -1,0 +1,35 @@
+# 验证记录与已知限制
+
+2026-11-05，在一块 ESP32-S3（16 MB Flash、8 MB PSRAM）与一台真实 iPhone 上完成。固件版本 `0.2.2-hybrid2`。不公开设备标识、账号截图或订单内容。
+
+## 已验证
+
+- 新仓库使用无真实凭据的临时配置，ESP32 core 3.3.2 STA 独立构建成功：Flash 1,510,879 bytes（45%），全局内存 100,144 bytes（30%）。未把编译产物或临时配置上传。
+- Flash 写入哈希验证通过，原固件完整备份保留在本地。
+- 带 Token 的 LAN 状态读取成功；无 Token 返回 HTTP 401。
+- 绝对点击设置图标、远处左上角返回按钮均命中。
+- 498 × 1080 截图上从 `(250,855)` 拖到 `(250,420)` 成功滚动设置；从 `(250,1075)` 拖到 `(250,420)`，300 ms，成功返回桌面。
+- `key cmd+space` 打开 Spotlight，`type 123` 显示数字，随后清除。
+- UxPlay 持续截图下，进入京东“我的 → 待评价 → 问答 → 邀我回答”，打开回答框，切换简体拼音全键盘并输入中文。提交后出现“发布成功”。
+- HID 描述符、参数拒绝、插值终点与按键报告通过 C++ ASan/UBSan 测试；JPEG 分片提取、缓存状态通过 Python 测试。
+- 新仓库 4 项 Python 测试、C++ ASan/UBSan 测试、Python 编译检查、构建脚本语法检查与 Skill 格式检查通过。GitHub Actions 配置了无需硬件的源码检查。
+
+## 尚未解决或充分验证
+
+- Consumer `homescreen` 指令返回 `ok`，测试手机未返回桌面；使用已验证的底部上滑手势。
+- `hybrid1` 的键盘正常，但绝对点击失败；`hybrid2` 把绝对指针 collection 放在相对鼠标之前后成功。这只是本机兼容性证据，不是所有 iOS 的通用规则。
+- 多机型、多 iOS 版本、横竖屏切换、边缘全范围、长时间稳定运行尚未系统验证。不要宣传为免校准的全机型方案。
+- 原 App/BLE、板子 AirPlay、OTA、旧相对鼠标路径没有完整回归测试。保留源码不等于全部功能验收通过。
+- 中文输入仍受 iOS 输入法影响，候选词可能有同音错误。固件没有中文粘贴能力。
+- UxPlay 只负责画面，不负责鼠标纠偏。绝对坐标来自 HID 与截图映射。
+- 持续截图减少重复启动开销，不消除模型推理、观察轮次、AirPlay 编解码或输入法耗时。尚无可复现的端到端速度基准。
+- 上游完整 host tests 曾因本机缺少 mbedTLS 开发头文件无法编译；不计作测试通过。
+
+## 本地检查
+
+```sh
+python3 -m unittest discover -s tests
+c++ -std=c++17 -Wall -Wextra -fsanitize=address,undefined -Ihardware/tests/hybrid hardware/tests/hybrid/test_absolute.cpp -o /tmp/iphone-mac-absolute-test
+/tmp/iphone-mac-absolute-test
+bash hardware/build.sh
+```
