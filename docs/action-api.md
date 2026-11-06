@@ -66,6 +66,8 @@ iphone_act(action="swipe", observation_id="当前编号", request_id="scroll-001
 - `changes.added` / `changes.removed`：变化的文字与位置；位置移动也视作移除再新增。
 - `timings_ms`：预检查、板子状态请求、动作请求、结果等待与合计耗时。预检查包含状态请求；等待包含 `wait.observation_ms` 的 OCR/取帧耗时，因此这些子项不应重复相加。合计不包括模型决策、客户端传输和最终图片序列化。
 
+返回的观察已经是本次操作后的观察。只要它仍新鲜且足以确定下一目标，就直接使用其中的编号继续操作，不必额外调用一次 `iphone_observe()`。
+
 需要减少模型阅读量时传 `changes_only=True`：仍返回画面元数据和变化条目，但省略 `observation.items`。新增条目的 ID 属于新画面，移除条目的 ID 属于旧画面；若要点未出现在变化列表里的目标，先取一次完整观察，不沿用旧编号。
 
 需要看图时传 `include_image=True`。HTTP 会附 JPEG base64；MCP 自动转成图片内容块，文字中不包含 base64。也可用返回的 `after_observation_id` 调用 `iphone_observe(include_image=True, ...)` 查看同一帧。缓存已淘汰时返回明确说明，不拿别的截图替代。
