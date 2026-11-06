@@ -51,8 +51,10 @@ class PilotAPI:
     def act(self, **payload):
         return self.request('/act', payload)
 
-    def insert(self, text, request_id, allow_newlines=False):
-        return self.request('/input', dict(text=text, request_id=request_id, allow_newlines=allow_newlines))
+    def insert(self, text, request_id, allow_newlines=False, include_image=False):
+        return self.request('/input', dict(text=text, request_id=request_id,
+                                           allow_newlines=allow_newlines,
+                                           include_image=include_image))
 
 
 def compact(value):
@@ -66,4 +68,4 @@ def compact(value):
         result['center'] = [round(number, 1) for number in value['center']]
         return result
     return {key: compact(item) for key, item in value.items()
-            if key not in ('image_sha256', 'note', 'box')}
+            if key not in ('image_sha256', 'note', 'box', 'source', 'cached')}

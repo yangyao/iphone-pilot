@@ -28,6 +28,44 @@ def save_json(path, data):
             os.unlink(temporary)
 
 
+def save_picture(picture, observation_id, output):
+    if not isinstance(picture, dict) or picture.get('mime_type') != 'image/jpeg':
+        raise PilotError('Expected a JPEG image; no file written')
+    try:
+        data = base64.b64decode(picture['data'], validate=True)
+    except (KeyError, ValueError):
+        raise PilotError('Image data is unreadable; no file written') from None
+    if hashlib.sha256(data).hexdigest() != observation_id:
+        raise PilotError('Image does not match observation; no file written')
+    output.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix='.iphone-image-', dir=output.parent)
+    try:
+        with os.fdopen(descriptor, 'wb') as stream:
+            stream.write(data)
+        os.replace(temporary, output)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    return str(output.resolve())
+
+
+def extract_image(result, args):
+    """Write an optional response image locally; never print base64 into tool text."""
+    container = result
+    if isinstance(result.get('observation'), dict):
+        container = result['observation']
+    picture = container.pop('image', None)
+    if picture is None:
+        return result
+    observation_id = container.get('observation_id')
+    if not observation_id:
+        raise PilotError('Image has no matching observation id; no file written')
+    default = args.session.with_name(args.session.stem + '-' + observation_id[:12] + '.jpg')
+    output = getattr(args, 'image_output', None) or default
+    result['image_file'] = save_picture(picture, observation_id, output)
+    return result
+
+
 @contextmanager
 def session_lock(path):
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -59,7 +97,7 @@ def run(args, api):
         if args.action == 'status':
             return api.request('/health')
         if args.action == 'observe':
-            result = api.observe()
+            result = api.observe(include_image=args.include_image)
             state['observation_id'] = result['observation_id']
             save_json(args.session, state)
             return result
@@ -69,27 +107,16 @@ def run(args, api):
                 raise PilotError('Run observe first, or pass --from OBSERVATION_ID')
             result = api.observe(observation_id, include_image=True)
             picture = result.pop('image')
-            data = base64.b64decode(picture['data'], validate=True)
-            if picture['mime_type'] != 'image/jpeg' or hashlib.sha256(data).hexdigest() != result['observation_id']:
-                raise PilotError('Image does not match observation; no file written')
             output = args.output or args.session.with_name(args.session.stem + '-image.jpg')
-            output.parent.mkdir(parents=True, exist_ok=True)
-            descriptor, temporary = tempfile.mkstemp(prefix='.iphone-image-', dir=output.parent)
-            try:
-                with os.fdopen(descriptor, 'wb') as stream:
-                    stream.write(data)
-                os.replace(temporary, output)
-            finally:
-                if os.path.exists(temporary):
-                    os.unlink(temporary)
-            return dict(result, image_file=str(output.resolve()))
+            return dict(result, image_file=save_picture(picture, result['observation_id'], output))
 
         requests = state.setdefault('requests', {})
         previous = requests.get(args.request_id)
         if args.action == 'type':
             text = args.text if args.text is not None else args.text_file.read_text(encoding='utf-8')
             route = '/input'
-            payload = dict(text=text, request_id=args.request_id, allow_newlines=args.allow_newlines)
+            payload = dict(text=text, request_id=args.request_id, allow_newlines=args.allow_newlines,
+                           include_image=args.include_image)
         else:
             route = '/act'
             observation_id = args.observation_id or (
@@ -98,7 +125,7 @@ def run(args, api):
                 raise PilotError('Run observe before acting')
             payload = dict(action=args.action, observation_id=observation_id, request_id=args.request_id,
                            timeout_ms=args.timeout, wait_for_text=args.wait,
-                           changes_only=False, include_image=False)
+                           changes_only=False, include_image=args.include_image)
             if args.action == 'tap':
                 if args.target is not None:
                     payload['target_id'] = args.target
@@ -140,7 +167,9 @@ def parser():
     result.add_argument('--full', action='store_true', help='include full OCR boxes/metadata')
     sub = result.add_subparsers(dest='action', required=True)
     sub.add_parser('status')
-    sub.add_parser('observe')
+    observe = sub.add_parser('observe')
+    observe.add_argument('--include-image', action='store_true')
+    observe.add_argument('--image-output', type=Path)
     image = sub.add_parser('image')
     image.add_argument('--from', dest='observation_id')
     image.add_argument('--output', type=Path)
@@ -150,6 +179,8 @@ def parser():
         action.add_argument('--from', dest='observation_id')
         action.add_argument('--wait')
         action.add_argument('--timeout', type=int, default=5000)
+        action.add_argument('--include-image', action='store_true')
+        action.add_argument('--image-output', type=Path)
         if name == 'tap':
             target = action.add_mutually_exclusive_group(required=True)
             target.add_argument('target', type=int, nargs='?')
@@ -163,6 +194,9 @@ def parser():
     source.add_argument('--text')
     source.add_argument('--text-file', type=Path)
     insert.add_argument('--allow-newlines', action='store_true')
+    insert.add_argument('--include-image', action='store_true',
+                        help='save the post-input JPEG with the OCR response')
+    insert.add_argument('--image-output', type=Path)
     return result
 
 
@@ -171,11 +205,19 @@ def main():
     try:
         api = PilotAPI(args.api)
         result = run(args, api)
+        if getattr(args, 'include_image', False):
+            result = extract_image(result, args)
         print(json.dumps(result if args.full else compact(result), ensure_ascii=False, separators=(',', ':')))
     except (PilotError, OSError, ValueError) as error:
-        print(json.dumps(dict(error=str(error), http_status=getattr(error, 'status', None),
-                              request_id=getattr(args, 'request_id', None),
-                              retry='Inspect phone; retry mutations with SAME id and arguments'), ensure_ascii=False))
+        message = str(error)
+        if args.action in ('observe', 'image', 'status'):
+            retry = 'Retry this read; no phone action was sent'
+        elif 'no action sent' in message.lower():
+            retry = 'No physical action was sent; observe again and reassess before using a new request id'
+        else:
+            retry = 'Inspect the phone; use the SAME request id and arguments to retrieve an uncertain outcome'
+        print(json.dumps(dict(error=message, http_status=getattr(error, 'status', None),
+                              request_id=getattr(args, 'request_id', None), retry=retry), ensure_ascii=False))
         raise SystemExit(1)
 
 

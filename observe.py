@@ -83,6 +83,7 @@ class Observer:
         self.fetch, self.ocr = fetch, ocr
         self.max_age, self.cache_size = max_age, cache_size
         self.cache, self.lock = OrderedDict(), threading.Lock()
+        self.latest_observation_id = None
 
     def observe(self, include_image=False, observation_id=None):
         with self.lock:
@@ -92,28 +93,47 @@ class Observer:
                     raise ObservationError('Observation expired; request a fresh observation', 404)
                 image, metadata, result = self.cache[observation_id]
                 cached = True
+                read_mode = 'pinned'
             else:
-                image, metadata = self.fetch()
-                if self.stale(metadata):
-                    raise ObservationError('No fresh frame: unlock iPhone and reconnect screen mirroring')
-                observation_id = hashlib.sha256(image).hexdigest()
-                if observation_id in self.cache:
-                    _, _, result = self.cache[observation_id]
+                try:
+                    image, metadata = self.fetch()
+                except Exception as exc:
+                    # A frame gap should not make the screen unreadable. Return the
+                    # newest known frame as explicitly stale; action/input paths
+                    # continue to reject stale observations.
+                    observation_id = self.latest_observation_id
+                    if observation_id in self.cache:
+                        image, metadata, result = self.cache[observation_id]
+                    else:
+                        raise ObservationError('No readable screen frame is available; retry shortly') from exc
                     cached = True
+                    read_mode = 'cached_fallback'
                 else:
-                    result = self.ocr(image)
-                    if result.get('image_sha256') != observation_id:
-                        raise ObservationError('OCR image hash mismatch')
-                    result = dict(result)
-                    result['items'] = [dict(item, id=i) for i, item in enumerate(result['items'])]
-                self.cache[observation_id] = image, dict(metadata), result
+                    observation_id = hashlib.sha256(image).hexdigest()
+                    read_mode = 'live' if not self.stale(metadata) else 'cached_fallback'
+                    if observation_id in self.cache:
+                        _, _, result = self.cache[observation_id]
+                        cached = True
+                    else:
+                        result = self.ocr(image)
+                        if result.get('image_sha256') != observation_id:
+                            raise ObservationError('OCR image hash mismatch')
+                        result = dict(result)
+                        result['items'] = [dict(item, id=i) for i, item in enumerate(result['items'])]
+                    self.latest_observation_id = observation_id
+                    self.cache[observation_id] = image, dict(metadata), result
             self.cache.move_to_end(observation_id)
             while len(self.cache) > self.cache_size:
                 self.cache.popitem(last=False)
             output = dict(result, observation_id=observation_id, cached=cached,
-                          source=dict(metadata), stale=self.stale(metadata))
-            output['source']['age_seconds'] = (None if metadata.get('received_at') is None
-                                               else time.time() - metadata['received_at'])
+                          source=dict(metadata),
+                          stale=(read_mode == 'cached_fallback' or self.stale(metadata)))
+            output['source']['read_mode'] = read_mode
+            age_seconds = (None if metadata.get('received_at') is None
+                           else time.time() - metadata['received_at'])
+            output['source']['age_seconds'] = age_seconds
+            output['frame_read_mode'] = read_mode
+            output['frame_age_seconds'] = age_seconds
             try:
                 keyboard, pairing_code = keyboard_connection(output)
                 endpoint = urlsplit(keyboard.base)
@@ -122,12 +142,21 @@ class Observer:
                                          pairing_code=pairing_code, connection_verified=False)
             except InputError as exc:
                 output['airtype'] = dict(detected=False, pairing_code=None, reason=str(exc))
-            if output['stale'] and not include_image:
-                output['note'] = 'Stale observation; do not use coordinates for actions.'
+            if output['stale']:
+                output['note'] = 'Showing the most recently captured frame; it may be old. Do not use its coordinates for actions.'
             if include_image:
                 output['image'] = dict(mime_type='image/jpeg',
                                        data=base64.b64encode(image).decode())
             return output
+
+    def capture_status(self):
+        """Report the receiver's latest frame immediately, without waiting for freshness."""
+        try:
+            image, metadata = self.fetch()
+        except Exception:
+            return dict(fresh_frame_available=False, cached_frame_available=False)
+        return dict(fresh_frame_available=(image is not None and not self.stale(metadata)),
+                    cached_frame_available=image is not None)
 
     def stale(self, metadata):
         received = metadata.get('received_at')
@@ -162,9 +191,14 @@ def make_server(observer, port=18766, inputter=None, actor=None):
                 if not isinstance(data, dict):
                     raise InputError('JSON body must be an object', 400)
                 if self.path == '/input':
-                    if set(data) - {'text', 'request_id', 'allow_newlines'}:
-                        raise InputError('Use text, request_id and optional allow_newlines', 400)
-                    output = inputter.insert(data.get('text'), data.get('request_id'), data.get('allow_newlines', False))
+                    if set(data) - {'text', 'request_id', 'allow_newlines', 'include_image'}:
+                        raise InputError('Use text, request_id, allow_newlines and include_image', 400)
+                    if data.get('include_image', False):
+                        output = inputter.insert(data.get('text'), data.get('request_id'),
+                                                 data.get('allow_newlines', False), True)
+                    else:
+                        output = inputter.insert(data.get('text'), data.get('request_id'),
+                                                 data.get('allow_newlines', False))
                 else:
                     output = actor.act(**data)
                 self.respond(output, 200)
@@ -180,7 +214,9 @@ def make_server(observer, port=18766, inputter=None, actor=None):
                 parsed = urlsplit(self.path)
                 if parsed.path == '/health':
                     output, code = dict(service='iphone-pilot-observe', ok=True,
-                                        input_enabled=inputter is not None, actions_enabled=actor is not None), 200
+                                        **observer.capture_status(),
+                                        input_enabled=inputter is not None,
+                                        actions_enabled=actor is not None), 200
                 elif parsed.path == '/observe':
                     query = parse_qs(parsed.query)
                     flag = query.get('include_image', ['false'])[0]

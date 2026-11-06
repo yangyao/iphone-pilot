@@ -29,7 +29,7 @@ iphone_type(text="这是一段完整的中文正文。", request_id="jd-answer-0
 
 多段文章仅在已确认多行编辑器时增加 `allow_newlines=true`。单次支持最多 20,000 个字符，但实际可输入长度仍受目标 App 限制，超长文章尚未实机验证。服务只插入正文，不点击发布或发送。
 
-返回值中的 `accepted:true` 只是键盘 HTTP 确认。`verification.status:text_detected_after_input` 表示 OCR 在后续画面读到了原文（忽略空白和 Unicode 宽度差异），且输入前没有读到相同文字；它不证明焦点正确，也不代表已经发布。长文没有完整显示、OCR 误字或画面没及时更新时会返回 `not_confirmed`，即使文字可能已成功输入，此时查看输入框，不要盲目重发。`status:uncertain` 表示发送结果不明，也必须先检查。
+返回值中的 `accepted:true` 只是键盘 HTTP 确认。`iphone_type` 同时返回输入后核验用的观察、文字与坐标；`include_image=true` 会附上同一帧截图，通常无需再单独调用 `iphone_observe`。`verification.status:text_detected_after_input` 表示 OCR 在后续画面读到了原文（忽略空白和 Unicode 宽度差异），且输入前没有读到相同文字；它不证明焦点正确，也不代表已经发布。长文没有完整显示、OCR 误字或画面没及时更新时会返回 `not_confirmed`，即使文字可能已成功输入，此时查看返回的观察/截图，不要盲目重发。`status:uncertain` 表示发送结果不明，也必须先检查。
 
 若键盘未展开、画面过期、地址或配对码不清、出现多个候选码，工具停止，不猜数字。不支持自动从任意页面找输入框、切换第三方键盘或关闭配对要求；这些仍由 Agent 根据页面完成。读取到的 IP 不可达时也不会扫描网络，需要核对手机 Wi-Fi 地址。
 

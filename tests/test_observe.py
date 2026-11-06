@@ -63,11 +63,13 @@ class ObservationTests(unittest.TestCase):
         self.assertFalse(result['airtype']['detected'])
         self.assertIsNone(result['airtype']['pairing_code'])
 
-    def test_stale_latest_rejected_and_old_pin_marked(self):
+    def test_stale_latest_returns_cached_frame_and_old_pin_marked(self):
         first = self.observer.observe()
         self.observer.max_age = -1
-        with self.assertRaises(ObservationError):
-            self.observer.observe()
+        fallback = self.observer.observe()
+        self.assertEqual(fallback['observation_id'], first['observation_id'])
+        self.assertTrue(fallback['stale'])
+        self.assertEqual(fallback['frame_read_mode'], 'cached_fallback')
         self.assertTrue(self.observer.observe(True, first['observation_id'])['stale'])
 
     def test_eviction_and_hash_validation(self):

@@ -155,11 +155,13 @@ class ActionTests(unittest.TestCase):
         self.observer.current['stale'] = True
         with self.assertRaises(ActionError):
             self.actor.act(**self.arguments)
+        self.assertEqual(len(self.board.commands), 1)
+        self.assertTrue(self.board.commands[0].startswith('absmove '))
         self.observer.current['stale'] = False
         self.board.state['usb'] = 'asleep'
         with self.assertRaises(ActionError):
             self.actor.act(**self.arguments)
-        self.assertEqual(self.board.commands, [])
+        self.assertEqual(len(self.board.commands), 1)
 
     def test_acknowledgment_and_new_jpeg_are_not_page_success(self):
         self.observer.after_pages = [copy.deepcopy(BEFORE)]

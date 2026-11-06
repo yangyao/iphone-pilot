@@ -27,11 +27,11 @@ AirType 地址在部分屏幕上字号很小。检测到配对面板时，会额
 
 HTTP 的 `include_image=true` 添加 `image: {mime_type, data}`，data 为 JPEG base64。带 `observation_id` 取回同一张图，即使手机已经翻页；最近 8 张观察保存在内存，过期返回 404。HTTP JSON 主要供程序使用，Agent 优先通过 MCP 取得真正的图片内容块。
 
-最新帧超过 5 秒或接收源停止，返回 503，不冒充实时画面。`--max-age` 可配置。缓存观察过期仍可查看，但 `stale:true` 时不能用其坐标操作。接收时间只证明 Mac 收到了帧，不能证明 AirPlay 没有冻结或应用没有卡住。新接收端提供与图像原子绑定的时间和序号；兼容旧接收端时 `source.metadata_exact:false`，时间与序号只是近似状态，图片与 OCR 仍由哈希绑定。`/health` 仅表示 API 存活，不表示手机已连接。
+观察不等待画面达到某个“新鲜度”门槛：它立即读取接收器最近的帧并返回 OCR。如果帧超过 5 秒、接收器给不出新内容但还保留旧图，或服务只能使用内存中的上一帧，结果会标记 `stale:true`，并带上 `frame_read_mode`、`frame_age_seconds`。这样可以继续查看最后画面，同时让 Agent 知道它有多旧。`iphone_act` 与 `iphone_type` 仍拒绝使用 stale 画面执行点击或输入；只有从未取得过画面且没有缓存可读时，观察才返回 503。`--max-age` 可配置。接收时间只证明 Mac 收到了帧，不能证明 AirPlay 没有冻结或应用没有卡住。MCP/CLI 默认保留 `stale`、读取模式与帧龄；完整 `source` 诊断字段用 `full=true` 查看。新接收端提供与图像原子绑定的时间和序号；兼容旧接收端时 `source.metadata_exact:false`，时间与序号只是近似状态，图片与 OCR 仍由哈希绑定。`/health` 仅表示 API 存活，不表示手机已连接。
 
 ## MCP
 
-使用官方 Python MCP SDK 的维护版 1.30.0（固定版本，避免主版本接口变化），通过 stdio 提供观察、输入和动作三个工具：
+使用官方 Python MCP SDK 的维护版 1.30.0（固定版本，避免主版本接口变化），通过 stdio 提供状态、观察、输入和动作四个工具：`iphone_status()` 分开报告近期帧是否可用于点击，以及接收器是否仍保留可查看的旧图；它不推断手机镜像连接状态，也不需要 Agent 直接访问接收器 HTTP 端口。
 
 ```json
 {"mcpServers":{"iphone-pilot":{"command":"uv","args":["run","/ABSOLUTE/PATH/iphone-pilot/tools/observe_mcp.py"]}}}
@@ -45,11 +45,14 @@ HTTP 的 `include_image=true` 添加 `image: {mime_type, data}`，data 为 JPEG 
 iphone_observe()
 iphone_observe(include_image=true, observation_id="上一次返回的编号")
 iphone_type(text="需要输入的整段中文。", request_id="draft-001")
+iphone_type(text="需要输入的整段中文。", request_id="draft-002", include_image=true)
 iphone_act(action="tap", observation_id="当前编号", target_id=12,
            request_id="open-page-001", wait_for_text="目标页面文字")
+iphone_act(action="tap", observation_id="当前编号", target_id=12,
+           request_id="inspect-result-001", include_image=true)
 ```
 
-普通观察调用只有文字内容块；带图时另附 MCP `ImageContent`，文字中不塞 base64。点击仍使用绝对坐标 HID；`iphone_type` 自动从已展开的 AirType 键盘读取配对信息并一次输入，详见 [中文输入](chinese-input.md)。输入不包含点击发布。不要把服务端口暴露到局域网或公网，结果包含手机屏幕内容。
+普通观察调用只有文字内容块；带图时另附 MCP `ImageContent`，文字中不塞 base64。`iphone_type` 会把输入后用于 OCR 核验的观察及坐标直接放在同一结果中；输入结果不确定时也会尽量附上当前观察。`include_image=true` 再附对应截图，因此通常无需紧接着另调观察。输入不包含点击发布。点击仍使用绝对坐标 HID；`iphone_type` 自动从已展开的 AirType 键盘读取配对信息并一次输入，详见 [中文输入](chinese-input.md)。不要把服务端口暴露到局域网或公网，结果包含手机屏幕内容。
 
 `iphone_act` 将点击或拖动、等待页面变化、返回 OCR 合为一次调用，支持文字条件、变化摘要和阶段耗时。板子配置及结果状态详见 [动作 API](action-api.md)。
 

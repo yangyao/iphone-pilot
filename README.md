@@ -27,7 +27,7 @@ Agent 使用的是手机上现有的 App 和页面。你决定要做什么、提
 
 iPhone Pilot 持续把手机画面送到 Mac，让 Agent 随时读取最新截图；点击使用截图上的位置，减少反复校准相对鼠标；每次页面切换或提交之后，再观察结果，决定下一步。
 
-现在 Agent 可以先读屏幕上的文字和坐标，遇到不明确的图标再看原图。常驻的本地观察服务把截图、OCR 和缓存封装起来，通过一个 MCP 工具调用：`iphone_observe()` 默认返回文字，`include_image=true` 才附带图片。[观察 API 与 MCP 接入 →](docs/observation-api.md)
+现在 Agent 可以先读屏幕上的文字和坐标，遇到不明确的图标再看原图。常驻的本地观察服务把截图、OCR 和缓存封装起来：MCP 工具默认返回文字，传 `include_image=true` 才附带同一帧图片；固定 CLI 也可用 `--include-image` 一次取回 OCR 并把图片保存到本地。[观察 API 与 MCP 接入 →](docs/observation-api.md)
 
 中文输入也能一次调用：展开 AirType 键盘后，`iphone_type` 自动读取当前配对信息，连接并输入整段正文，再检查文字是否出现在画面上。它只负责输入，发布仍按任务授权操作。[中文输入与自动配对 →](docs/chinese-input.md)
 

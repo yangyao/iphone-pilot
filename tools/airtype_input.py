@@ -104,13 +104,15 @@ class AirTypeInput:
         finally:
             db.close()
 
-    def insert(self, text, request_id, allow_newlines=False):
+    def insert(self, text, request_id, allow_newlines=False, include_image=False):
         if not isinstance(text, str) or not text or '\x00' in text or len(text) > 20000:
             raise InputError('text must contain 1..20000 characters and no NUL', 400)
         if not isinstance(request_id, str) or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,128}', request_id):
             raise InputError('request_id must be a stable unique identifier (1..128 ASCII characters)', 400)
         if not isinstance(allow_newlines, bool):
             raise InputError('allow_newlines must be a boolean', 400)
+        if not isinstance(include_image, bool):
+            raise InputError('include_image must be a boolean', 400)
         if ('\n' in text or '\r' in text) and not allow_newlines:
             raise InputError('Line breaks require allow_newlines=true and a confirmed multiline editor', 400)
         digest = hashlib.sha256(json.dumps([text, allow_newlines], ensure_ascii=False).encode()).hexdigest()
@@ -122,7 +124,8 @@ class AirTypeInput:
             if previous:
                 if previous[0] != digest:
                     raise InputError('request_id already used for different input')
-                return dict(json.loads(previous[1]), replayed=True)
+                result = dict(json.loads(previous[1]), replayed=True)
+                return self.present_observation(result, include_image)
 
             before = self.observer.observe()
             discovered, code = keyboard_connection(before)
@@ -174,18 +177,24 @@ class AirTypeInput:
             except Exception:
                 # A timeout, malformed reply or server error may follow successful insertion.
                 result['message'] = 'Input outcome uncertain; inspect the field. This request_id will not resend.'
+                try:
+                    result['observation'] = self.observer.observe()
+                except Exception:
+                    result['observation'] = None
                 self.save(request_id, digest, result)
-                return result
+                return self.present_observation(result, include_image)
             result.update(accepted=True, status='accepted')
             self.save(request_id, digest, result)
             before_text = normalized('\n'.join(item['text'] for item in current['items']))
             wanted = normalized(text)
             result['verification'] = {'status': 'not_confirmed'}
+            result['observation'] = None
             for attempt in range(self.verify_attempts):
                 if attempt:
                     time.sleep(.3)
                 try:
                     after = self.observer.observe()
+                    result['observation'] = after
                     after_text = normalized('\n'.join(item['text'] for item in after['items']))
                     if not after['stale'] and wanted and wanted in after_text and wanted not in before_text:
                         result['verification'] = dict(status='text_detected_after_input',
@@ -194,14 +203,16 @@ class AirTypeInput:
                 except Exception:
                     break
             self.save(request_id, digest, result)
-            return result
+            return self.present_observation(result, include_image)
         finally:
             self.lock.release()
 
     def save(self, request_id, digest, result):
+        # The journal stores status/IDs only, never screen OCR, screenshots or draft text.
+        stored = {key: value for key, value in result.items() if key != 'observation'}
         with self.database() as db:
             db.execute('UPDATE inputs SET result=? WHERE request_id=? AND digest=?',
-                       (json.dumps(result), request_id, digest))
+                       (json.dumps(stored), request_id, digest))
 
     def claim(self, request_id, digest, result):
         try:
@@ -215,3 +226,22 @@ class AirTypeInput:
                 raise InputError('request_id already used for different input') from None
             return dict(json.loads(previous[1]), replayed=True)
         return None
+
+    def present_observation(self, result, include_image):
+        observation = result.get('observation')
+        if observation is None and result.get('replayed'):
+            # Journal intentionally excludes screen text and images. A safe replay
+            # may read the current screen, but must never repeat the insertion.
+            try:
+                observation = self.observer.observe()
+                result['observation'] = observation
+            except Exception:
+                pass
+        if observation and include_image:
+            try:
+                result['observation'] = self.observer.observe(
+                    include_image=True, observation_id=observation['observation_id'])
+            except Exception:
+                # Preserve the OCR result already returned by the verification pass.
+                pass
+        return result

@@ -17,6 +17,18 @@ mcp = FastMCP('iPhone Pilot')
 API = PilotAPI(os.environ.get('IPHONE_OBSERVE_URL', 'http://127.0.0.1:18766'))
 
 
+@mcp.tool()
+def iphone_status() -> dict:
+    """Check whether the local service can currently provide a fresh screen frame.
+
+    fresh_frame_available reports whether a frame is recent enough for actions;
+    cached_frame_available reports whether an older image can still be viewed.
+    Neither field infers whether phone mirroring is connected. Status is read
+    immediately; observation still returns the latest cached frame when stale.
+    """
+    return API.request('/health')
+
+
 def content(result, picture=None, full=False):
     output = result if full else compact(result)
     blocks = [TextContent(type='text', text=json.dumps(output, ensure_ascii=False, separators=(',', ':')))]
@@ -34,7 +46,9 @@ def iphone_observe(include_image: bool = False, observation_id: str | None = Non
     Set include_image for ambiguous icons.
 
     Supply a previous observation_id to inspect that SAME frame with an image.
-    IDs expire from a bounded cache. stale=true means do not act on coordinates.
+    IDs expire from a bounded cache. If capture pauses, the most recent cached
+    frame is still returned with stale=true; inspect it, but never act on its
+    coordinates. A temporary-unavailable error means no readable frame is cached.
     Text boxes are not proof of tappability; verify new state after navigation.
     Results are compact by default; full=true restores original boxes/metadata.
     """
@@ -44,18 +58,23 @@ def iphone_observe(include_image: bool = False, observation_id: str | None = Non
 
 
 @mcp.tool()
-def iphone_type(text: str, request_id: str, allow_newlines: bool = False) -> dict:
+def iphone_type(text: str, request_id: str, allow_newlines: bool = False,
+                include_image: bool = False) -> list[TextContent | ImageContent]:
     """Insert whole Unicode text through the currently focused AirType keyboard.
 
     Focus the intended field and show AirType Web Access first. The API reads the
     current address/code with OCR, reuses or pairs a session, inserts ONCE and checks
-    OCR for new text. Does not click Send/Publish. request_id must be unique per
+    OCR for new text and returns that post-input OCR in the same result. Set
+    include_image for the matching frame. Does not click Send/Publish. request_id must be unique per
     intended insertion; reuse the SAME id and text on timeout/retry to avoid replay.
     accepted=true is an HTTP acknowledgment; verification may be not_confirmed.
     Only allow newlines for a confirmed multiline field. Never retry uncertain
     insertion with a new request_id without inspecting the phone first.
     """
-    return API.insert(text, request_id, allow_newlines)
+    result = API.insert(text, request_id, allow_newlines, include_image)
+    observation = result.get('observation')
+    picture = observation.pop('image', None) if observation else None
+    return content(result, picture)
 
 
 @mcp.tool()
@@ -75,7 +94,10 @@ def iphone_act(action: str, observation_id: str, request_id: str,
     Reuse SAME request_id and action on retry: commands are durably protected from
     replay, including after restart. Never use a new ID to blindly repeat a submit.
     changes_only omits full OCR items, leaving metadata plus added/removed items;
-    include_image adds an actual MCP image block. No implicit extra clicks/retries.
+    include_image adds an actual MCP image block. If the cached frame is stale,
+    the service first moves the pointer (without clicking) to an OCR-empty
+    location and requires a newly received changed frame. It then revalidates
+    the intended target. The tap/swipe itself is never retried automatically.
     full=true restores full OCR boxes; default output keeps IDs/centers and safety fields.
     """
     payload = dict(action=action, observation_id=observation_id, request_id=request_id,
