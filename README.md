@@ -27,7 +27,7 @@ Agent 使用的是手机上现有的 App 和页面。你决定要做什么、提
 
 iPhone Pilot 持续把手机画面送到 Mac，让 Agent 随时读取最新截图；点击使用截图上的位置，减少反复校准相对鼠标；每次页面切换或提交之后，再观察结果，决定下一步。
 
-现在 Agent 可以先读屏幕上的文字和坐标，遇到不明确的图标再看原图。常驻的本地观察服务把截图、OCR 和缓存封装起来：MCP 工具默认返回文字，传 `include_image=true` 才附带同一帧图片；固定 CLI 也可用 `--include-image` 一次取回 OCR 并把图片保存到本地。[观察 API 与 MCP 接入 →](docs/observation-api.md)
+现在 Agent 可以先读屏幕上的文字和坐标，遇到不明确的图标再看原图。后台观察服务持续准备 OCR，将已完成结果写入 SQLite，截图按 UTC 时间与影格序号保存。查询直接读取最新完成记录，返回接收时间、帧龄和固定图片地址；需要辨认图标时再取图。默认保留最近 1,000 笔，自动清理旧记录与图片。MCP 工具默认返回文字，传 `include_image=true` 才附带同一帧图片；固定 CLI 也可用 `--include-image` 一次取回 OCR 并把图片保存到本地。[观察 API 与 MCP 接入 →](docs/observation-api.md)
 
 中文输入也能一次调用：展开 AirType 键盘后，`iphone_type` 自动读取当前配对信息，连接并输入整段正文，再检查文字是否出现在画面上。它只负责输入，发布仍按任务授权操作。[中文输入与自动配对 →](docs/chinese-input.md)
 
@@ -66,9 +66,25 @@ flowchart LR
 1. 准备 Mac、支持原生 USB HID 的 ESP32-S3 开发板、数据线，以及可连接 USB 输入设备的 iPhone。当前只验证了一块 16 MB Flash / 8 MB PSRAM 的 ESP32-S3。
 2. 按[安装与刷机指南](docs/setup.md)安装依赖、填写本地 Wi-Fi 和 Token、编译并刷写固件。
 3. 将板子接到 iPhone，开启辅助触控；Mac、手机与板子连接同一个可信局域网。
-4. 启动接收程序，把 iPhone 镜像到 Mac，再从截图中取得坐标进行控制。
+4. 使用 `./iphone serve start` 启动服务，在 iPhone 控制中心选择屏幕镜像 **iPhone Agent Mac**，执行 `./iphone observe` 读取最新画面。
 
 **[安装、刷机与命令示例 →](docs/setup.md)**
+
+## 一个入口管理本地服务
+
+macOS 的 launchd 管理接收器与观察 API，支持登录后启动和异常恢复。首次启动可指定 UxPlay 与板子配置，后续启动复用已保存设置：
+
+```sh
+./iphone serve start --uxplay /ABSOLUTE/PATH/uxplay --board-host BOARD_IP --config /ABSOLUTE/PATH/secrets.h
+./iphone serve status
+./iphone serve restart --api
+./iphone serve logs
+./iphone serve stop
+```
+
+状态分别报告服务是否就绪、是否有新画面，以及 UxPlay 是否存在重复或孤立程序。API 单独重启保留投屏；使用 `./iphone serve restart --receiver` 重启接收器后，需要从手机重新投屏。UxPlay 使用单实例锁并在退出时回收子程序。[服务管理与配置 →](docs/setup.md)
+
+操作默认等待画面变化并带回稳定后的 OCR 与截图地址，通常可以直接决定下一步。用 `--wait` 指定目的页文字，例如 `./iphone tap 12 --id open-review --wait 发布`。结果区分画面稳定和目标确认；发布仍需核对成功页。[等待条件 →](docs/action-api.md)
 
 ## 交给自己的 Agent
 
@@ -88,6 +104,7 @@ flowchart LR
 | AirType 整段中文输入 | 测试页、备忘录连续两段、京东问答均成功 |
 | 中文拼音输入与候选词选择 | 可作备用，仍需要选词和核对 |
 | 京东买家问答 | 完成一条中文回答，出现“发布成功” |
+| 淘宝追评 | SQLite 观察与操作后 OCR 流程已在真实手机完成，确认“评价成功” |
 | Consumer Home 专用按键 | 命令返回成功，但手机没有返回桌面 |
 | 全机型、长时间运行、旧 App/BLE 共存 | 尚未充分验证 |
 

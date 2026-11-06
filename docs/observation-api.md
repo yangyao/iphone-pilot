@@ -8,7 +8,7 @@ Agent 不必每一步都重新理解整张手机截图。iPhone Pilot 持续接�
 
 ```sh
 bash tools/build-ocr.sh
-python3 observe.py
+./iphone serve start
 ```
 
 服务仅监听 `127.0.0.1:18766`，接收端默认 `18765`。OCR 子进程按需启动并常驻，超时或崩溃后在下一次请求重建；相同 JPEG 的识别结果复用。观察请求不会调用云模型或操作手机。服务默认另提供 AirType 输入，配置板子后还可执行动作；使用 `--read-only` 可仅启用只读观察。退出服务使用 Ctrl+C。
@@ -66,3 +66,11 @@ iphone_act(action="tap", observation_id="当前编号", target_id=12,
 淘宝花洒支架的一次评价流程已用 OCR 文字完成主要导航，用原图确认评分星星，用 AirType 输入中文，最后读到“发布成功”。这说明该组合可用；用户感受到误点减少，但尚未做速度和错误率的对照测量。OCR 也曾误认个别汉字，App 图标下方的文字中心有时点不开，需要点击图标本身。
 
 此版本的默认接口是 Apple Vision OCR，不自动运行 OmniParser。研究实验中的 OmniParser 图标描述存在误识别，不能把检测框当作真实交互树。未来可将其作为可选补充，现阶段无文字目标按需查看原图更直接。
+
+## SQLite 背景觀察
+
+觀察服務現在由背景執行緒每 0.5 秒讀取最新影格，完成 OCR 後提交到 `runtime/observations/observations.sqlite`（WAL 模式）。`/observe` 直接查詢最新完成的紀錄，不在請求內等待 OCR；首次啟動尚無紀錄時返回 503，可稍後重試。同一圖片雜湊復用 OCR 與圖片檔案，只更新最近接收時間。背景處理不建立待處理影格隊列。
+
+每筆結果增加 `received_at`、`ocr_completed_at`（Unix 秒）、`image_path`（本機絕對路徑）與 `image_url`（相對觀察 API 的地址）。圖片使用 UTC 接收時間、序號與雜湊命名，例如 `frames/20261106/101530.123000_s123_abcd12345678.jpg`。`GET /image?observation_id=HASH` 可按需讀取該筆 JPEG；CLI/MCP 的 `include_image` 仍可用。
+
+`--observation-directory` 指定資料目錄，`--observation-interval` 指定背景間隔（至少 0.1 秒），`--retain-observations` 指定保留數量（預設 1000）。超出上限會刪除舊紀錄與對應圖片，過期 ID 返回 404。服務重啟保留已完成紀錄，讀取時重新計算過期狀態；最新一筆不保證仍可用於操作。接收時間仍只代表 Mac 收到影格。

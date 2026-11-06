@@ -18,12 +18,14 @@ cmake --build uxplay-src/build -j 4
 启动持续接收：
 
 ```sh
-python3 receiver.py --directory runtime -- python3 uxplay_source.py
+./iphone serve start
 ```
 
 iPhone 在控制中心打开“屏幕镜像”，选择 **iPhone Agent Mac**。三台设备在同一局域网，允许 UxPlay 的本地网络访问与入站连接。不要为了控制而把 Mac 切到板子的热点，否则可能失去互联网。
 
 查看 `http://127.0.0.1:18765/status` 和 `runtime/latest.jpg`；也可读 `/frame.jpg`。这个 HTTP 服务只监听本机，没有预览窗口。Ctrl-C 停止。截图和日志可能包含个人信息，默认不纳入版本控制。
+
+若投屏畫面過期，可執行 `./iphone serve restart --receiver` 重啟 Mac 端 UxPlay 接收器與觀察 API，並查看接收狀態。重啟不會自動操作 iPhone；若畫面仍舊或無畫面，請在 iPhone 控制中心打開「螢幕鏡像輸出」，重新選擇 **iPhone Agent Mac**，再執行 `./iphone observe` 確認。
 
 ## 固件构建
 
@@ -89,3 +91,22 @@ python3 hardware/tools/hybrid_control.py --host BOARD_IP status
 - 消费者 Home 键没有在测试手机上生效。可从截图底部向上拖动返回桌面；坐标需按实际截图选择。
 
 接口返回 `ok` 只代表执行请求，不代表页面已变化或内容已发布。每次导航和提交都要核对实际画面。
+
+## 統一服務管理（macOS）
+
+使用 `./iphone serve start` 啟動接收器與觀察 API。此入口安裝使用者級 launchd 服務，登入後啟動、異常退出自動恢復；重複 start 不會建立重複程序。所有設定路徑和 Python 路徑寫入私有 plist，板子 Token 留在 secrets.h。
+
+```sh
+./iphone serve start
+./iphone serve status
+./iphone serve restart --api
+./iphone serve restart --receiver
+./iphone serve logs --api --lines 40
+./iphone serve stop
+```
+
+首次啟動可指定 `--board-host IP --config /path/to/secrets.h --uxplay /path/to/uxplay`；板子預設取 runtime/board.json，config 沿用 CLI 的 SECRETS 設定，UxPlay 從環境、PATH 尋找。後續未指定覆蓋參數的重啟復用已存設定。start/restart 最多等待 15 秒確認 HTTP 就緒，不要求已投屏；status 分別回報 API、接收器、畫面新鮮度、動作是否配置以及各服務是否受管理。actions=configured 只表示載入板子設定，不能證明 USB 可用。
+
+舊手動啟動程序若占用端口，命令會拒絕接管並提示先停止原程序，不會按程序名稱批量 kill。遷移時先在原執行視窗停止 receiver.py 與 observe.py，再執行 serve start；接收器重啟後需從手機重新投屏。serve stop 會卸載並刪除本專案的 plist；再次 start 重新建立。launchd 標籤按倉庫路徑區分，但固定端口同時只允許一組服務。
+
+UxPlay 包裝程序使用同一使用者共用的單實例鎖；SIGTERM、SIGINT 或影格管線結束時會終止並回收 UxPlay，3 秒未退出則強制結束。launchd 同時管理整個工作程序群組。`serve status` 的 `uxplay` 欄位列出 PID、父 PID、重複實例及孤立 PID；啟動／重啟接收器前若發現同名孤立 UxPlay，會拒絕啟動並列出精確 PID，避免持續產生重複接收器。單實例鎖只能約束使用此包裝程序的實例，外部手動啟動的 UxPlay 仍需透過狀態檢查辨識。

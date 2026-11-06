@@ -325,6 +325,12 @@ def discover_board(timeout=0.35):
 
 
 def run(args, api):
+    if args.action == 'serve':
+        try:
+            from .service_manager import Services
+        except ImportError:
+            from service_manager import Services
+        return Services(REPO_ROOT).run(args)
     with session_lock(args.session):
         if args.session.exists():
             try:
@@ -784,6 +790,15 @@ def parser():
     insert.add_argument('--include-image', action='store_true',
                         help='save the post-input JPEG with the OCR response')
     insert.add_argument('--image-output', type=Path)
+    serve = sub.add_parser('serve', help='manage macOS launchd services')
+    serve.add_argument('service_action', choices=('start', 'status', 'restart', 'stop', 'logs'))
+    scope = serve.add_mutually_exclusive_group()
+    scope.add_argument('--api', dest='api_only', action='store_true')
+    scope.add_argument('--receiver', dest='receiver_only', action='store_true')
+    serve.add_argument('--board-host')
+    serve.add_argument('--config', default=str(SECRETS_PATH))
+    serve.add_argument('--uxplay')
+    serve.add_argument('--lines', type=int, default=40)
     return result
 
 
@@ -797,7 +812,7 @@ def main():
         print(json.dumps(result if args.full else compact(result), ensure_ascii=False, separators=(',', ':')))
     except (PilotError, OSError, ValueError) as error:
         message = str(error)
-        if args.action in ('observe', 'image', 'status', 'wait', 'pixel', 'board', 'scroll'):
+        if args.action in ('observe', 'image', 'status', 'wait', 'pixel', 'board', 'scroll', 'serve'):
             retry = 'Retry this read; no phone action was sent'
         elif 'no action sent' in message.lower():
             retry = 'No physical action was sent; observe again and reassess before using a new request id'

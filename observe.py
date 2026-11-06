@@ -14,6 +14,7 @@ import threading
 import time
 from urllib.parse import parse_qs, urlsplit
 from urllib.request import ProxyHandler, build_opener
+from tools.observation_store import ObservationStore
 from tools.airtype_input import AirTypeInput, InputError, keyboard_connection
 from tools.action_runtime import ActionError, PhoneActions
 from hardware.tools.hybrid_control import BoardClient
@@ -163,6 +164,52 @@ class Observer:
         return not metadata.get('source_running') or received is None or time.time() - received > self.max_age
 
 
+class StoredObserver(Observer):
+    """Collect in the background; query only completed SQLite records."""
+    def __init__(self, fetch, ocr, directory, max_age=5, interval=0.5, retain=1000):
+        super().__init__(fetch, ocr, max_age)
+        self.store = ObservationStore(directory, retain)
+        self.stop = threading.Event()
+        self.interval = interval
+        self.collector = threading.Thread(target=self.collect, daemon=True)
+        self.collector.start()
+
+    def collect(self):
+        while not self.stop.is_set():
+            try:
+                result = super().observe(include_image=True)
+                if result['frame_read_mode'] == 'live':
+                    raw = dict(result)
+                    picture = raw.pop('image')
+                    self.store.put(base64.b64decode(picture['data']), result['source'], raw)
+            except Exception:
+                pass  # Keep completed observations readable during receiver/OCR gaps.
+            self.stop.wait(self.interval)
+
+    def observe(self, include_image=False, observation_id=None):
+        row = self.store.get(observation_id, include_image)
+        if row is None:
+            raise ObservationError('Observation expired' if observation_id else 'No completed observation available; retry shortly', 404 if observation_id else 503)
+        key, metadata, result, path, completed, picture = row
+        result.update(observation_id=key, cached=True, image_path=path,
+                      image_url='/image?observation_id=' + key,
+                      received_at=metadata.get('received_at'), ocr_completed_at=completed)
+        result['source'] = metadata
+        result['frame_age_seconds'] = time.time() - metadata['received_at'] if metadata.get('received_at') else None
+        result['stale'] = self.stale(metadata)
+        result['frame_read_mode'] = 'cached_fallback' if result['stale'] else ('pinned' if observation_id else 'database')
+        if result['stale']:
+            result['airtype'] = dict(detected=False, pairing_code=None, reason='Fresh screen required before input')
+        if include_image:
+            result['image'] = dict(mime_type='image/jpeg', data=base64.b64encode(picture).decode())
+        return result
+
+    def close(self):
+        self.stop.set()
+        self.collector.join()
+        self.store.close()
+
+
 def make_server(observer, port=18766, inputter=None, actor=None):
     class Handler(BaseHTTPRequestHandler):
         def respond(self, output, code):
@@ -217,6 +264,19 @@ def make_server(observer, port=18766, inputter=None, actor=None):
                                         **observer.capture_status(),
                                         input_enabled=inputter is not None,
                                         actions_enabled=actor is not None), 200
+                elif parsed.path == '/image':
+                    key = parse_qs(parsed.query).get('observation_id', [None])[0]
+                    if not key:
+                        raise ObservationError('observation_id required', 400)
+                    result = observer.observe(True, key)
+                    body = base64.b64decode(result['image']['data'])
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'image/jpeg')
+                    self.send_header('Cache-Control', 'no-store')
+                    self.send_header('Content-Length', str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
                 elif parsed.path == '/observe':
                     query = parse_qs(parsed.query)
                     flag = query.get('include_image', ['false'])[0]
@@ -251,11 +311,18 @@ if __name__ == '__main__':
     parser.add_argument('--board-config', default=os.environ.get('IPHONE_BOARD_CONFIG') or
                         str(Path(__file__).parent / 'hardware/hid_bridge/secrets.h'),
                         help='local secrets.h containing the board HTTP token; never returned by API')
+    parser.add_argument('--observation-directory', default='runtime/observations')
+    parser.add_argument('--observation-interval', type=float, default=0.5)
+    parser.add_argument('--retain-observations', type=int, default=1000)
     args = parser.parse_args()
+    if args.observation_interval < 0.1:
+        parser.error('--observation-interval must be at least 0.1')
     if urlsplit(args.source).hostname not in ('127.0.0.1', 'localhost', '::1'):
         parser.error('--source must be a loopback receiver')
     worker = OCRWorker(args.ocr_binary)
-    observer = Observer(lambda: fetch_frame(args.source.rstrip('/')), worker, args.max_age)
+    observer = StoredObserver(lambda: fetch_frame(args.source.rstrip('/')), worker,
+                              args.observation_directory, args.max_age,
+                              args.observation_interval, args.retain_observations)
     interaction_lock = threading.Lock()
     inputter = None if args.disable_input or args.read_only else AirTypeInput(
         observer, args.input_directory, lock=interaction_lock)
@@ -272,4 +339,5 @@ if __name__ == '__main__':
         pass
     finally:
         server.server_close()
+        observer.close()
         worker.close()

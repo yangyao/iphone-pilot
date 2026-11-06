@@ -61,6 +61,28 @@ def same_layout(before, after, anchor=None):
     return all(nearby(before, point) == nearby(after, point) for point in anchors)
 
 
+def stable_content(before, after):
+    """Ignore explicit countdown values only when checking post-action stability."""
+    def cleaned(observation):
+        result = dict(observation)
+        result['items'] = [dict(item, text=re.sub(
+            r'\d+\s*(?=天|小时|分钟|秒)', '#', item['text']))
+            for item in content_items(observation)]
+        return result
+    return same_layout(cleaned(before), cleaned(after))
+
+
+def target_found(observation, expected):
+    text = normalized('\n'.join(item['text'] for item in content_items(observation)))
+    return any(normalized(option) in text for option in expected.split('|') if normalized(option))
+
+
+def loading_content(observation):
+    return any(normalized(item['text']) in
+               ('加载中', '加载中...', '正在加载', '正在加载...', '请稍候', '请稍候...')
+               for item in content_items(observation))
+
+
 def probe_point(observation, excluded=()):
     """Choose an OCR-empty edge location for a non-click pointer liveness probe."""
     width, height = observation['width'], observation['height']
@@ -259,6 +281,9 @@ class PhoneActions:
     def wait(self, before, finished_at, expected, timeout_ms):
         deadline = self.monotonic() + timeout_ms / 1000
         last, stable, previous_received = None, None, finished_at
+        started = self.monotonic()
+        stable_since = None
+        stable_ms = 300 if expected is not None else 600
         observation_ms, polls = 0., 0
         wait_status = 'timeout'
         error = None
@@ -268,23 +293,28 @@ class PhoneActions:
                 candidate = self.observer.observe()
             except Exception:
                 error = 'observation_unavailable'
-                break
+                self.sleep(max(0, min(self.poll_interval, deadline - self.monotonic())))
+                continue
             observation_ms += (self.monotonic() - poll_start) * 1000
             polls += 1
             received = candidate.get('source', {}).get('received_at')
             if not candidate['stale'] and received is not None and received > previous_received:
+                error = None
                 last = candidate
                 previous_received = received
                 changed = not same_layout(before, candidate)
-                found = expected is None or normalized(expected) in normalized(
-                    '\n'.join(item['text'] for item in content_items(candidate)))
-                if changed and found and content_items(candidate):
-                    if stable is not None and same_layout(stable, candidate):
+                found = expected is None or target_found(candidate, expected)
+                if changed and found and content_items(candidate) and not loading_content(candidate):
+                    now = self.monotonic()
+                    if stable is None or not stable_content(stable, candidate):
+                        stable_since = now
+                    stable = candidate
+                    if ((now - stable_since) * 1000 >= stable_ms and
+                            (expected is not None or now - started >= .9)):
                         wait_status = 'condition_met' if expected is not None else 'changed'
                         break
-                    stable = candidate
                 else:
-                    stable = None
+                    stable, stable_since = None, None
             # A new JPEG or a changed clock is not a changed page.
             self.sleep(max(0, min(self.poll_interval, deadline - self.monotonic())))
         if error:
@@ -292,7 +322,10 @@ class PhoneActions:
         elif last is None:
             wait_status = 'no_new_frame'
         result = dict(wait=dict(status=wait_status, expected_text=expected, polls=polls,
-                                observation_ms=round(observation_ms, 1)),
+                                observation_ms=round(observation_ms, 1),
+                                stable=wait_status in ('condition_met', 'changed'),
+                                target_confirmed=wait_status == 'condition_met',
+                                stable_required_ms=stable_ms),
                       after_observation_id=None, changes=None)
         if last is not None:
             result['after_observation_id'] = last['observation_id']

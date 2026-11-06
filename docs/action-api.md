@@ -7,7 +7,7 @@
 先完成 [连接设置](setup.md) 和 [观察服务设置](observation-api.md)。在运行观察服务时指定板子的局域网地址与本地凭据文件：
 
 ```sh
-python3 observe.py --board-host BOARD_IP --board-config /ABSOLUTE/PATH/secrets.h
+./iphone serve start --board-host BOARD_IP --config /ABSOLUTE/PATH/secrets.h
 ```
 
 `--board-config` 默认是仓库的 `hardware/hid_bridge/secrets.h`，读取其中的 `HYBRID_HTTP_TOKEN`；也可指定原有本地固件工作目录中的文件。Token 不会返回给模型或写入动作结果。不要把凭据复制到公开配置、README 或 Skill。
@@ -111,3 +111,11 @@ iphone_act(action="swipe", observation_id="当前编号", request_id="scroll-001
 已用模拟投屏和板子完成动作转换、页面核对、稳定等待、文字条件、时钟变化排除、断流、超时、防重放、重启恢复和 MCP 图片返回验证。
 
 2026-11-06 真实淘宝评价流程中，接口完成进入评价页、点星、打开键盘、发布确认与最终成功文字核验。进入评价页约 3.05 s，发布确认约 2.43 s，最终发布确认及结果约 2.90 s，均为各次调用实测，不是全流程耗时。OCR 抖动也导致了一些页面一致性拒绝和等待超时，隐藏键盘曾使用直接 HID 客户端回退；不能把本次实测描述成全程无回退或所有动作都能稳定等待。详见 [验证记录](validation.md)。
+
+### 操作後自動帶回穩定觀察
+
+每次動作預設等待並附上對應觀察，包含 OCR 與 SQLite 中固定的截圖地址；通常直接使用回傳結果決定下一步。若頁面仍在載入、結果缺失或超時，再額外觀察。
+
+建議用 `wait_for_text`（CLI 的 `--wait`）指定目的頁的文字，支援 `|` 分隔替代文字，例如 `评价成功|发布成功`。任一目標必須在操作後的新影格、已變化的頁面持續穩定至少 300ms。未指定目標時，主要 OCR 需穩定至少 600ms，且等待總時間至少 900ms；明確的「加载中」「请稍候」等提示尚未消失時不視為穩定。穩定比較忽略明確以天、小时、分钟、秒為單位的倒數數字；點擊前的座標與目標核對仍使用原始 OCR。
+
+`wait.stable` 表示是否取得穩定的變化畫面，`wait.target_confirmed` 僅在指定目標出現並穩定時為 true。`condition_met` 確認指定文字，`changed` 只確認畫面變化；超時仍盡量附上最新已取得的 OCR 和截圖地址。觀察服務短暫不可用時，在原期限內繼續等待，不會重送動作。以上時間是觀察條件，不保證延遲載入的內容已全部完成；提交應指定成功提示並核對實際結果。

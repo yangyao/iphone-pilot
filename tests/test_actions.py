@@ -110,7 +110,7 @@ class ActionTests(unittest.TestCase):
         self.assertEqual(self.board.commands, ['abstap 16449 15170'])
         self.assertTrue(result['accepted'])
         self.assertEqual(result['wait']['status'], 'condition_met')
-        self.assertEqual(result['wait']['polls'], 2)
+        self.assertGreaterEqual(result['wait']['polls'], 3)
         self.assertEqual(result['observation']['observation_id'], AFTER['observation_id'])
         self.assertEqual([item['text'] for item in result['changes']['added']], ['待评价商品', '去评价'])
         self.assertGreater(result['timings_ms']['total'], 0)
@@ -260,6 +260,24 @@ class ActionTests(unittest.TestCase):
         result = self.actor.act(**dict(self.arguments, wait_for_text=None))
         self.assertEqual(result['wait']['status'], 'changed')
         self.assertEqual(result['after_observation_id'], AFTER['observation_id'])
+
+    def test_wait_accepts_alternative_target_and_reports_confirmation(self):
+        result = self.actor.act(**dict(self.arguments, wait_for_text='评价成功|待评价商品'))
+        self.assertTrue(result['wait']['target_confirmed'])
+        self.assertTrue(result['wait']['stable'])
+
+    def test_loading_label_must_clear_before_return(self):
+        loading = page('loading', [('加载中', 200)])
+        self.observer.after_pages = [loading] * 5 + [copy.deepcopy(AFTER)]
+        result = self.actor.act(**dict(self.arguments, wait_for_text=None, timeout_ms=2000))
+        self.assertEqual(result['after_observation_id'], AFTER['observation_id'])
+        self.assertTrue(result['wait']['stable'])
+
+    def test_countdown_can_change_while_main_content_settles(self):
+        self.observer.after_pages = [page(str(i), [('待评价商品', 200),
+            ('去评价', 500), (f'剩余{20-i}秒', 800)]) for i in range(12)]
+        result = self.actor.act(**self.arguments)
+        self.assertTrue(result['wait']['target_confirmed'])
 
     def test_invalid_actions_and_coordinates_do_not_send(self):
         for invalid in [dict(action='command'), dict(target_id=True), dict(timeout_ms=99999),
