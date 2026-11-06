@@ -7,6 +7,7 @@
 import json
 import os
 from urllib.parse import urlencode, urlsplit
+from urllib.error import HTTPError
 from urllib.request import ProxyHandler, Request, build_opener
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ImageContent, TextContent
@@ -16,6 +17,21 @@ API = os.environ.get('IPHONE_OBSERVE_URL', 'http://127.0.0.1:18766')
 urlopen = build_opener(ProxyHandler({})).open
 if urlsplit(API).hostname not in ('127.0.0.1', 'localhost', '::1'):
     raise ValueError('IPHONE_OBSERVE_URL must be loopback')
+
+
+def api_json(request, timeout):
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            return json.load(response)
+    except HTTPError as error:
+        message = f'Local API returned HTTP {error.code}'
+        try:
+            message = json.load(error).get('error', message)
+        except (ValueError, AttributeError):
+            pass
+        finally:
+            error.close()
+        raise ValueError(message) from None
 
 
 @mcp.tool()
@@ -29,8 +45,7 @@ def iphone_observe(include_image: bool = False, observation_id: str | None = Non
     query = {'include_image': str(include_image).lower()}
     if observation_id:
         query['observation_id'] = observation_id
-    with urlopen(API.rstrip('/') + '/observe?' + urlencode(query), timeout=40) as response:
-        result = json.load(response)
+    result = api_json(API.rstrip('/') + '/observe?' + urlencode(query), 40)
     picture = result.pop('image', None)
     content = [TextContent(type='text', text=json.dumps(result, ensure_ascii=False, separators=(',', ':')))]
     if picture:
@@ -54,8 +69,7 @@ def iphone_type(text: str, request_id: str, allow_newlines: bool = False) -> dic
                       data=json.dumps(dict(text=text, request_id=request_id,
                                            allow_newlines=allow_newlines), ensure_ascii=False).encode(),
                       headers={'Content-Type': 'application/json'})
-    with urlopen(request, timeout=150) as response:
-        return json.load(response)
+    return api_json(request, 150)
 
 
 if __name__ == '__main__':

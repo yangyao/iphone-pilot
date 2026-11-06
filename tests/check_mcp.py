@@ -42,6 +42,9 @@ async def check(port):
             response = json.loads(inserted.content[0].text)
             assert response['accepted'] and response['submitted'] is False
             assert inputter.received == ('中文文章🙂\n第二段', 'mcp-test-1', True)
+            expired = await session.call_tool('iphone_observe', {'observation_id': 'missing'})
+            assert expired.isError
+            assert 'Observation expired' in expired.content[0].text
             print('MCP text/image/input protocol roundtrip passed')
 
 
