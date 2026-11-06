@@ -1,0 +1,5 @@
+#!/bin/sh
+# Fixed entry point. Works from any working directory.
+set -eu
+TASK_ROOT=$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve().parent)' "$0")
+exec python3 "$TASK_ROOT/tools/iphone.py" "$@"

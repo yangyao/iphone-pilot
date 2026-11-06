@@ -32,6 +32,9 @@ async def check(port):
             assert not text.isError
             assert [part.type for part in text.content] == ['text']
             result = json.loads(text.content[0].text)
+            assert 'box' not in result['items'][0]
+            full = await session.call_tool('iphone_observe', {'full': True})
+            assert 'box' in json.loads(full.content[0].text)['items'][0]
             picture = await session.call_tool('iphone_observe', dict(
                 include_image=True, observation_id=result['observation_id']))
             assert not picture.isError
@@ -60,7 +63,24 @@ async def check(port):
             expired = await session.call_tool('iphone_observe', {'observation_id': 'missing'})
             assert expired.isError
             assert 'Observation expired' in expired.content[0].text
-            print('MCP observation/image/input/action/replay protocol roundtrip passed')
+            async def cli(*arguments):
+                process = await asyncio.create_subprocess_exec(
+                    str(ROOT / 'iphone'), '--api', f'http://127.0.0.1:{port}',
+                    '--session', str(Path(directory.name) / 'cli.json'), *arguments,
+                    cwd=directory.name, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                stdout, stderr = await process.communicate()
+                assert process.returncode == 0, stderr.decode() + stdout.decode()
+                return json.loads(stdout)
+            seen = await cli('observe')
+            assert seen['items'][0]['text'] == '新页面'
+            assert 'box' not in seen['items'][0]
+            clicked = await cli('tap', '0', '--id', 'cli-1', '--timeout', '200')
+            assert clicked['accepted'] and len(board.commands) == 2
+            again = await cli('tap', '0', '--id', 'cli-1', '--timeout', '200')
+            assert again['replayed'] and len(board.commands) == 2
+            picture_file = await cli('image')
+            assert Path(picture_file['image_file']).read_bytes() == IMAGE_AFTER
+            print('MCP and fixed CLI observation/image/input/action/replay integration passed')
 
 
 # Protocol fixture only; real OCR is exercised separately on macOS.
@@ -72,7 +92,8 @@ observer = Observer(lambda: (IMAGE_AFTER if phase['changed'] else IMAGE,
                     lambda image: dict(image_sha256=hashlib.sha256(image).hexdigest(),
                                        width=1, height=1,
                                        items=[dict(text='新页面' if image == IMAGE_AFTER else '原页面',
-                                                   center=[.5, .5], confidence=1., clickable=None)]))
+                                                   center=[.5, .5], box=[0, 0, 1, 1],
+                                                   confidence=1., clickable=None)]))
 
 
 class FakeInput:

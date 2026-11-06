@@ -39,6 +39,8 @@ HTTP 的 `include_image=true` 添加 `image: {mime_type, data}`，data 为 JPEG 
 
 接收端和观察服务先独立启动。MCP 适配器只负责转发，不会再启动一套投屏。可用 `IPHONE_OBSERVE_URL` 指定另一个本地观察端口。依赖首次安装需要网络，后续观察使用本机服务。
 
+实际注册、固定短命令入口及会话保护见 [Agent 调用入口](agent-entrypoints.md)。日常操作直接使用工具或 `./iphone`，不再临时生成 HTTP 请求脚本。MCP 默认为精简 OCR；需要原始 box 等字段时传 `full=true`，HTTP 格式不变。
+
 ```text
 iphone_observe()
 iphone_observe(include_image=true, observation_id="上一次返回的编号")
