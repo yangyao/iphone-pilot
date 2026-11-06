@@ -164,6 +164,32 @@ class InputTests(unittest.TestCase):
         uncertain = screen(code='I23456')
         self.assertIsNone(keyboard_connection(uncertain)[1])
 
+    def test_keyboard_ip_and_local_alias_are_one_panel_not_ambiguity(self):
+        current = screen()
+        current['items'].append(dict(text='http://airtype.local:8307/', center=[200, 870], confidence=1.))
+        client, code = keyboard_connection(current)
+        self.assertEqual(client.base, 'http://192.168.2.140:8307')
+        self.assertEqual(code, '123456')
+
+    def test_competing_ips_or_ports_remain_ambiguous(self):
+        for text, y in [('http://192.168.2.141:8307/', 870),
+                        ('http://airtype.local:7777/', 870),
+                        ('http://airtype.local:8307/', 1000)]:
+            current = screen()
+            current['items'].append(dict(text=text, center=[200, y], confidence=1.))
+            with self.subTest(text=text, y=y), self.assertRaises(InputError):
+                keyboard_connection(current)
+
+    def test_cropped_footer_can_supply_a_confident_url_without_repairing_bad_ocr(self):
+        current = screen()
+        current['items'][1].update(text='http://192.168:2.140:8307/', confidence=.3)
+        current['items'].extend([
+            dict(text='http://airtype.local:8307/', center=[200, 945], confidence=1., ocr_region='airtype-footer'),
+            dict(text='http://192.168.2.140:8307/', center=[200, 962], confidence=1., ocr_region='airtype-footer')])
+        client, code = keyboard_connection(current)
+        self.assertEqual(client.base, 'http://192.168.2.140:8307')
+        self.assertEqual(code, '123456')
+
 
 if __name__ == '__main__':
     unittest.main()

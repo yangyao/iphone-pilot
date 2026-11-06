@@ -1,4 +1,4 @@
-// Local text localization prototype. Text centers are not guaranteed tappable controls.
+// Local text localization. Text centers are not guaranteed tappable controls.
 import Foundation
 import Vision
 import ImageIO
@@ -16,9 +16,8 @@ func recognize(_ data: Data) throws -> [String: Any] {
     request.usesLanguageCorrection = false
     let start = ProcessInfo.processInfo.systemUptime
     try VNImageRequestHandler(cgImage: image, orientation: .up).perform([request])
-    let elapsed = ProcessInfo.processInfo.systemUptime - start
     let width = Double(image.width), height = Double(image.height)
-    let results: [[String: Any]] = (request.results ?? []).compactMap { observation in
+    var results: [[String: Any]] = (request.results ?? []).compactMap { observation in
         guard let text = observation.topCandidates(1).first else { return nil }
         let box = observation.boundingBox
         let x = box.minX * width, y = (1 - box.maxY) * height
@@ -27,6 +26,41 @@ func recognize(_ data: Data) throws -> [String: Any] {
                 "box": [x, y, w, h], "center": [x + w / 2, y + h / 2],
                 "clickable": NSNull()]
     }
+    // AirType renders its URL in a tiny footer. Re-read only that strip when its
+    // pairing panel is present; keep the original frame hash and pixel coordinates.
+    let hasPairingPanel = results.contains {
+        let text = $0["text"] as? String ?? ""
+        return text.contains("配对码") || text.contains("配對碼") || text.lowercased().contains("pairing code")
+    }
+    let cropY = floor(height * 0.82), cropHeight = height - floor(height * 0.82)
+    if hasPairingPanel,
+       let crop = image.cropping(to: CGRect(x: 0, y: cropY, width: width, height: cropHeight)),
+       let context = CGContext(data: nil, width: image.width * 3, height: crop.height * 3,
+                               bitsPerComponent: 8, bytesPerRow: 0,
+                               space: CGColorSpaceCreateDeviceRGB(),
+                               bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) {
+        context.interpolationQuality = .high
+        context.draw(crop, in: CGRect(x: 0, y: 0, width: image.width * 3, height: crop.height * 3))
+        if let enlarged = context.makeImage() {
+            let footer = VNRecognizeTextRequest()
+            footer.recognitionLevel = .accurate
+            footer.recognitionLanguages = ["en-US"]
+            footer.usesLanguageCorrection = false
+            if (try? VNImageRequestHandler(cgImage: enlarged, orientation: .up).perform([footer])) != nil {
+                for observation in footer.results ?? [] {
+                    guard let candidate = observation.topCandidates(1).first,
+                          candidate.string.contains("://") || candidate.string.contains(".local:") else { continue }
+                    let box = observation.boundingBox
+                    let x = box.minX * width, y = cropY + (1 - box.maxY) * cropHeight
+                    let w = box.width * width, h = box.height * cropHeight
+                    results.append(["text": candidate.string, "confidence": candidate.confidence,
+                                    "box": [x, y, w, h], "center": [x + w / 2, y + h / 2],
+                                    "clickable": NSNull(), "ocr_region": "airtype-footer"])
+                }
+            }
+        }
+    }
+    let elapsed = ProcessInfo.processInfo.systemUptime - start
     let output: [String: Any] = [
         "width": image.width, "height": image.height,
         "coordinate_origin": "top-left", "recognition_seconds": elapsed,

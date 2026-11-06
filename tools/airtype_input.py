@@ -1,5 +1,6 @@
 """One-call AirType insertion using fresh OCR and a durable no-replay journal."""
 import hashlib
+import ipaddress
 from contextlib import contextmanager
 import json
 import os
@@ -42,9 +43,26 @@ def keyboard_connection(observation):
             except ValueError:
                 continue
             endpoints.append((client, item['center'][1]))
-    if len({client.base for client, _ in endpoints}) != 1:
+    unique = {client.base: (client, y) for client, y in endpoints}
+    if len(unique) > 1:
+        # The real keyboard advertises an IP and a .local alias simultaneously.
+        # Accept one numeric address with a same-port adjacent alias, never two IPs.
+        from urllib.parse import urlsplit
+        numeric = []
+        for entry in unique.values():
+            try:
+                ipaddress.ip_address(urlsplit(entry[0].base).hostname)
+            except ValueError:
+                continue
+            numeric.append(entry)
+        ports = {urlsplit(client.base).port for client, _ in unique.values()}
+        rows = [y for _, y in unique.values()]
+        if len(numeric) == 1 and len(ports) == 1 and max(rows) - min(rows) <= height * .05:
+            endpoints = numeric
+            unique = {numeric[0][0].base: numeric[0]}
+    if len(unique) != 1:
         raise InputError('Show one readable AirType Web Access address on the focused keyboard')
-    client, y = endpoints[0]
+    client, y = next(iter(unique.values()))
     nearby = [item for item in items if abs(item['center'][1] - y) <= height * .3]
     panel = '\n'.join(item['text'] for item in nearby).casefold()
     if not any(label in panel for label in ('airtype', 'web access', 'webaccess',

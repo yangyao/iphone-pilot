@@ -15,6 +15,8 @@ Check `stale` and source age before acting. IDs and item numbers belong to one o
 
 Observations also include `airtype`: when the current keyboard panel is readable, it contains endpoint/host/port and a six-digit `pairing_code` string. This is extracted from the same OCR, not another screenshot. It is not a verified connection or a saved Token. Missing/ambiguous/stale codes are null; never substitute a historical code. Prefer `iphone_type` to orchestrate connection and insertion rather than manually assembling calls.
 
+The keyboard's tiny footer may require the built-in local OCR crop; valid IP and .local URLs can coexist. Do not guess punctuation/digits in an unreadable address or lower code confidence to force input. If discovery fails, inspect the current image and use the documented manual client fallback. For wait_for_text, use text actually displayed in the phone's language: this AirType setup shows 配对码 / 网页输入, not necessarily “Web”.
+
 The underlying receiver is at `http://127.0.0.1:18765/status`; its `file` is a fallback for image viewing if OCR is unavailable. If no receiver exists, run `python3 receiver.py --directory runtime -- python3 uxplay_source.py` once, not a screenshot subprocess for every observation. The phone must mirror to **iPhone Agent Mac**, not the board. Identify the board IP from the user's setup, never hardcode another user's address.
 
 Use `python3 hardware/tools/hybrid_control.py --host BOARD_IP status` to confirm the board is reachable. For clicks use `tap X Y --width W --height H`; for drags use `swipe X1 Y1 X2 Y2 --width W --height H --ms 400`. Coordinates are actual screenshot pixels, not 0–1000 prompt units. Do not run relative calibration or the old `esp32agent --aim` path for these absolute commands.

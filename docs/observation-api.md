@@ -21,7 +21,9 @@ curl 'http://127.0.0.1:18766/observe?include_image=true&observation_id=PREVIOUS_
 
 默认结果为 JSON：`observation_id`（图片 SHA-256）、`width/height`、`coordinate_origin: top-left`、`items`（`id/text/box/center/confidence/clickable`）、`source`、`stale`、`cached`。`box` 是 `[x,y,width,height]`，`center` 是 `[x,y]`，单位为原图像素。编号仅在该观察内有效。`clickable:null` 表示未验证可点击性。
 
-同时从这一次 OCR 提取 `airtype`，不增加截图或识别调用。当 AirType Web Access 面板可辨认时，返回 `detected:true`、`endpoint`、`host`、`port`、`pairing_code`（字符串，保留前导零），以及 `connection_verified:false`。这只是当前画面中读到的信息，未尝试联网配对；不会返回 Token。面板未出现、连接信息有歧义或画面过期时，返回 `detected:false`、`pairing_code:null` 和原因。可识别地址但没有可读六位码时，`detected:true` 而 `pairing_code:null`，仍不能推断无需配对。
+同时从本帧 OCR 提取 `airtype`，不额外获取手机截图或请求模型。当 AirType Web Access 面板可辨认时，返回 `detected:true`、`endpoint`、`host`、`port`、`pairing_code`（字符串，保留前导零），以及 `connection_verified:false`。这只是当前画面中读到的信息，未尝试联网配对；不会返回 Token。面板未出现、连接信息有歧义或画面过期时，返回 `detected:false`、`pairing_code:null` 和原因。可识别地址但没有可读六位码时，`detected:true` 而 `pairing_code:null`，仍不能推断无需配对。
+
+AirType 地址在部分屏幕上字号很小。检测到配对面板时，会额外在同一张图的底部做一次局部放大 OCR，URL 条目标记为 `ocr_region:airtype-footer`；不增加手机截图，也不请求模型识图。局部识别保留原图坐标。若面板并列 IP 与 `.local`，同端口相邻地址可作为替代，优先用唯一 IP；冲突的 IP/端口仍拒绝。此局部识别和首次 OCR 冷启动会增加耗时。
 
 HTTP 的 `include_image=true` 添加 `image: {mime_type, data}`，data 为 JPEG base64。带 `observation_id` 取回同一张图，即使手机已经翻页；最近 8 张观察保存在内存，过期返回 404。HTTP JSON 主要供程序使用，Agent 优先通过 MCP 取得真正的图片内容块。
 
