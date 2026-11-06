@@ -6,7 +6,7 @@ import threading
 import time
 import unittest
 from urllib.error import HTTPError
-from urllib.request import ProxyHandler, build_opener
+from urllib.request import ProxyHandler, Request, build_opener
 
 urlopen = build_opener(ProxyHandler({})).open
 
@@ -71,6 +71,39 @@ class ObservationTests(unittest.TestCase):
                 urlopen(url + '/observe?include_image=maybe')
             self.assertEqual(caught.exception.code, 400)
             caught.exception.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
+    def test_http_input_rejects_browser_and_invalid_json_without_sending(self):
+        class FakeInput:
+            calls = []
+
+            def insert(self, *args):
+                self.calls.append(args)
+                return {'accepted': True, 'submitted': False}
+
+        inputter = FakeInput()
+        server = make_server(self.observer, 0, inputter)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        url = f'http://127.0.0.1:{server.server_port}/input'
+        try:
+            payload = json.dumps(dict(text='中文🙂', request_id='http-1')).encode()
+            for headers, body, code in (
+                ({'Content-Type': 'text/plain'}, payload, 403),
+                ({'Content-Type': 'application/json', 'Origin': 'https://example.com'}, payload, 403),
+                ({'Content-Type': 'application/json'}, b'not-json', 400),
+            ):
+                with self.assertRaises(HTTPError) as caught:
+                    urlopen(Request(url, data=body, headers=headers))
+                self.assertEqual(caught.exception.code, code)
+                caught.exception.close()
+            self.assertEqual(inputter.calls, [])
+            with urlopen(Request(url, data=payload, headers={'Content-Type': 'application/json'})) as response:
+                self.assertTrue(json.load(response)['accepted'])
+            self.assertEqual(inputter.calls, [('中文🙂', 'http-1', False)])
         finally:
             server.shutdown()
             server.server_close()

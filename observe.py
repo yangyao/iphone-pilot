@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Persistent, local OCR observations. No model calls and no phone actions."""
+"""Persistent local OCR observations and optional one-call AirType insertion."""
 import argparse
 import base64
 from collections import OrderedDict
@@ -13,6 +13,7 @@ import threading
 import time
 from urllib.parse import parse_qs, urlsplit
 from urllib.request import ProxyHandler, build_opener
+from tools.airtype_input import AirTypeInput, InputError
 
 urlopen = build_opener(ProxyHandler({})).open
 
@@ -122,8 +123,38 @@ class Observer:
         return not metadata.get('source_running') or received is None or time.time() - received > self.max_age
 
 
-def make_server(observer, port=18766):
+def make_server(observer, port=18766, inputter=None):
     class Handler(BaseHTTPRequestHandler):
+        def respond(self, output, code):
+            body = json.dumps(output, ensure_ascii=False, separators=(',', ':')).encode()
+            self.send_response(code)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.send_header('Cache-Control', 'no-store')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            try:
+                if self.path != '/input' or inputter is None:
+                    raise InputError('Input endpoint unavailable', 404)
+                if self.headers.get('Origin') or self.headers.get_content_type() != 'application/json':
+                    raise InputError('Use a local API client with application/json, not a browser page', 403)
+                length = int(self.headers.get('Content-Length', '0'))
+                if not 0 < length <= 128 * 1024:
+                    raise InputError('JSON request must contain 1..131072 bytes', 400)
+                data = json.loads(self.rfile.read(length))
+                if not isinstance(data, dict) or set(data) - {'text', 'request_id', 'allow_newlines'}:
+                    raise InputError('Use text, request_id and optional allow_newlines', 400)
+                output = inputter.insert(data.get('text'), data.get('request_id'), data.get('allow_newlines', False))
+                self.respond(output, 200)
+            except (InputError, ObservationError) as exc:
+                self.respond({'error': str(exc)}, exc.status)
+            except (ValueError, TypeError):
+                self.respond({'error': 'Invalid JSON input request'}, 400)
+            except Exception:
+                self.respond({'error': 'Input unavailable; inspect phone before retrying with SAME request_id'}, 503)
+
         def do_GET(self):
             try:
                 parsed = urlsplit(self.path)
@@ -142,13 +173,7 @@ def make_server(observer, port=18766):
                 output, code = {'error': str(exc)}, exc.status
             except Exception:
                 output, code = {'error': 'Observation unavailable; check receiver and OCR worker'}, 503
-            body = json.dumps(output, ensure_ascii=False, separators=(',', ':')).encode()
-            self.send_response(code)
-            self.send_header('Content-Type', 'application/json; charset=utf-8')
-            self.send_header('Cache-Control', 'no-store')
-            self.send_header('Content-Length', str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            self.respond(output, code)
 
         def log_message(self, *_):
             pass
@@ -161,11 +186,15 @@ if __name__ == '__main__':
     parser.add_argument('--source', default='http://127.0.0.1:18765')
     parser.add_argument('--max-age', type=float, default=5)
     parser.add_argument('--ocr-binary', default=str(Path(__file__).parent / 'runtime/bin/screen-ocr'))
+    parser.add_argument('--disable-input', action='store_true', help='serve observations only')
+    parser.add_argument('--input-directory', default=str(Path(__file__).parent / 'runtime'))
     args = parser.parse_args()
     if urlsplit(args.source).hostname not in ('127.0.0.1', 'localhost', '::1'):
         parser.error('--source must be a loopback receiver')
     worker = OCRWorker(args.ocr_binary)
-    server = make_server(Observer(lambda: fetch_frame(args.source.rstrip('/')), worker, args.max_age), args.port)
+    observer = Observer(lambda: fetch_frame(args.source.rstrip('/')), worker, args.max_age)
+    inputter = None if args.disable_input else AirTypeInput(observer, args.input_directory)
+    server = make_server(observer, args.port, inputter)
     print(f'Observation API: http://127.0.0.1:{server.server_port}/observe', flush=True)
     try:
         server.serve_forever()

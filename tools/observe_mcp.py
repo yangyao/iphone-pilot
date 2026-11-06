@@ -7,7 +7,7 @@
 import json
 import os
 from urllib.parse import urlencode, urlsplit
-from urllib.request import ProxyHandler, build_opener
+from urllib.request import ProxyHandler, Request, build_opener
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ImageContent, TextContent
 
@@ -36,6 +36,26 @@ def iphone_observe(include_image: bool = False, observation_id: str | None = Non
     if picture:
         content.append(ImageContent(type='image', data=picture['data'], mimeType=picture['mime_type']))
     return content
+
+
+@mcp.tool()
+def iphone_type(text: str, request_id: str, allow_newlines: bool = False) -> dict:
+    """Insert whole Unicode text through the currently focused AirType keyboard.
+
+    Focus the intended field and show AirType Web Access first. The API reads the
+    current address/code with OCR, reuses or pairs a session, inserts ONCE and checks
+    OCR for new text. Does not click Send/Publish. request_id must be unique per
+    intended insertion; reuse the SAME id and text on timeout/retry to avoid replay.
+    accepted=true is an HTTP acknowledgment; verification may be not_confirmed.
+    Only allow newlines for a confirmed multiline field. Never retry uncertain
+    insertion with a new request_id without inspecting the phone first.
+    """
+    request = Request(API.rstrip('/') + '/input',
+                      data=json.dumps(dict(text=text, request_id=request_id,
+                                           allow_newlines=allow_newlines), ensure_ascii=False).encode(),
+                      headers={'Content-Type': 'application/json'})
+    with urlopen(request, timeout=150) as response:
+        return json.load(response)
 
 
 if __name__ == '__main__':

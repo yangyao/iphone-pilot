@@ -29,6 +29,8 @@ iPhone Pilot 持续把手机画面送到 Mac，让 Agent 随时读取最新截�
 
 现在 Agent 可以先读屏幕上的文字和坐标，遇到不明确的图标再看原图。常驻的本地观察服务把截图、OCR 和缓存封装起来，通过一个 MCP 工具调用：`iphone_observe()` 默认返回文字，`include_image=true` 才附带图片。[观察 API 与 MCP 接入 →](docs/observation-api.md)
 
+中文输入也能一次调用：展开 AirType 键盘后，`iphone_type` 自动读取当前配对信息，连接并输入整段正文，再检查文字是否出现在画面上。它只负责输入，发布仍按任务授权操作。[中文输入与自动配对 →](docs/chinese-input.md)
+
 仓库也提供了可复用的操作 Skill，记录中文输入、候选词选择和操作失败后的处理经验。换一个 Agent 时，可以把这些已经走过的经验一起交给它。
 
 ## 中文原文，一次输入
