@@ -15,6 +15,14 @@ Do not generate ad hoc Python/urllib/heredoc HTTP scripts for routine observe/ta
 
 Read each result before choosing the next action. Reuse an action's returned observation directly. CLI requests require a stable --id; after an ambiguous failure, retry with the SAME id and arguments. The CLI pins retries to the original payload even after a new observe. A new id means a new physical action, not a workaround for uncertainty.
 
+### Await the complete result in one tool call
+
+The CLI already waits synchronously for the API. When invoking it through `exec_command`, retain the default 10000 ms foreground wait or explicitly set `yield_time_ms: 10000`. Use 30000 for a known slower operation. Do not set 1000 ms, append `&`, or use nohup for ordinary phone actions. With `functions.exec`, retain its normal outer wait instead of adding a one-second yield pragma. Native MCP calls should likewise be awaited directly.
+
+For example, invoke `exec_command` with `{"cmd":"iphone tap 12 --id task1-p1 --wait 发布","yield_time_ms":10000}`. A 2–3 second action returns its result in that same call; it does not wait the entire ten seconds. This command-tool foreground wait is separate from CLI `--timeout`, which controls how long the backend checks the phone's resulting state.
+
+Only if the tool reports an actually running process after the foreground wait, poll that original session with a suitable wait (normally 10000 ms). Do not add a poll after a completed result and do not re-execute a phone mutation to fetch its output. For a still-running `functions.exec` cell, use its corresponding wait tool rather than starting another command.
+
 ## Observe and act
 
 Prefer the persistent observation API/MCP described in [observation API](../../docs/observation-api.md). Call `iphone_observe()` for text and pixel centers; if MCP is unavailable, run `./iphone observe`. Start `bash tools/build-ocr.sh` once, then `python3 observe.py` if the service is absent. Default to text observations; request `include_image=true` with the previous `observation_id` (CLI: `./iphone image`) for ambiguous icons, stars, missing targets or unexpected results. This returns the same frame, not a different page. Do not pipe HTTP image base64 into the model as text.
