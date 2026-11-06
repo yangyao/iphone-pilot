@@ -75,7 +75,13 @@ class Services:
     def arguments(self, name, args):
         if self.path(name).exists() and not any((args.board_host, args.uxplay)):
             saved = plistlib.loads(self.path(name).read_bytes())
-            return saved['ProgramArguments'], saved.get('EnvironmentVariables', {})
+            arguments = saved['ProgramArguments']
+            if name == 'api' and getattr(args, 'parser_backend', None):
+                if '--parser-backend' in arguments:
+                    index = arguments.index('--parser-backend')
+                    del arguments[index:index+2]
+                arguments += ['--parser-backend', args.parser_backend]
+            return arguments, saved.get('EnvironmentVariables', {})
         python = str(Path(sys.executable).resolve())
         if name == 'receiver':
             binary = args.uxplay or os.environ.get('UXPLAY_BIN') or shutil.which('uxplay')
@@ -91,7 +97,7 @@ class Services:
         config = Path(args.config).resolve()
         if not config.is_file():
             raise ValueError('Board config missing; pass --config /path/to/secrets.h')
-        return [python, str(self.root / 'observe.py'), '--board-host', board, '--board-config', str(config)], {}
+        return [python, str(self.root / 'observe.py'), '--board-host', board, '--board-config', str(config), '--parser-backend', getattr(args, 'parser_backend', None) or 'apple'], {}
 
     def install(self, name, spec):
         arguments, environment = spec

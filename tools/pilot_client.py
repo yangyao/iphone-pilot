@@ -64,7 +64,7 @@ def compact(value):
     if not isinstance(value, dict):
         return value
     if 'text' in value and 'center' in value:
-        result = {key: value[key] for key in ('id', 'text', 'confidence', 'clickable') if key in value}
+        result = {key: value[key] for key in ('id', 'type', 'text', 'description', 'source', 'confidence', 'clickable') if key in value}
         result['center'] = [round(number, 1) for number in value['center']]
         return result
     return {key: compact(item) for key, item in value.items()

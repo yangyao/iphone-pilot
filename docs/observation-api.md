@@ -65,7 +65,7 @@ iphone_act(action="tap", observation_id="当前编号", target_id=12,
 
 淘宝花洒支架的一次评价流程已用 OCR 文字完成主要导航，用原图确认评分星星，用 AirType 输入中文，最后读到“发布成功”。这说明该组合可用；用户感受到误点减少，但尚未做速度和错误率的对照测量。OCR 也曾误认个别汉字，App 图标下方的文字中心有时点不开，需要点击图标本身。
 
-此版本的默认接口是 Apple Vision OCR，不自动运行 OmniParser。研究实验中的 OmniParser 图标描述存在误识别，不能把检测框当作真实交互树。未来可将其作为可选补充，现阶段无文字目标按需查看原图更直接。
+默认接口仍为 Apple Vision OCR；可显式启用下述 OmniParser 混合模式补充图示定位。检测框不是 App 真实交互树，图示功能应结合原图确认。
 
 ## SQLite 背景觀察
 
@@ -74,3 +74,11 @@ iphone_act(action="tap", observation_id="当前编号", target_id=12,
 每筆結果增加 `received_at`、`ocr_completed_at`（Unix 秒）、`image_path`（本機絕對路徑）與 `image_url`（相對觀察 API 的地址）。圖片使用 UTC 接收時間、序號與雜湊命名，例如 `frames/20261106/101530.123000_s123_abcd12345678.jpg`。`GET /image?observation_id=HASH` 可按需讀取該筆 JPEG；CLI/MCP 的 `include_image` 仍可用。
 
 `--observation-directory` 指定資料目錄，`--observation-interval` 指定背景間隔（至少 0.1 秒），`--retain-observations` 指定保留數量（預設 1000）。超出上限會刪除舊紀錄與對應圖片，過期 ID 返回 404。服務重啟保留已完成紀錄，讀取時重新計算過期狀態；最新一筆不保證仍可用於操作。接收時間仍只代表 Mac 收到影格。
+
+## 實驗：OmniParser 圖示偵測
+
+`./iphone serve restart --api --parser-backend omniparser-hybrid` 切換至 Apple Vision 文字＋微軟 OmniParser V2 圖示偵測。`--parser-backend apple` 切回預設。混合模式使用獨立的 observations-omniparser 資料目錄，保留同一張圖的 OCR 與圖示框；圖示以 `type:icon`、center、box、confidence 回傳，description 為 null，尚未啟用圖示描述模型。偵測框不代表已驗證可點擊，可查看原圖後使用座標操作。
+
+先執行 `tools/setup-omniparser.sh` 安裝依賴與權重（可用 HTTPS_PROXY 指定既有 HTTP 代理，uv 可用 UV_DEFAULT_INDEX 指定套件鏡像）。此實驗需 `runtime/omniparser-venv/bin/python`（Python 3.12、ultralytics、pillow）及 `runtime/omniparser-icon.pt`（微軟 OmniParser-v2.0 的 icon_detect/model.pt）。依賴與權重留在忽略的 runtime 目錄，不提交。該 YOLOv8 權重按官方模型卡採 AGPL-3.0；上游來源：https://huggingface.co/microsoft/OmniParser-v2.0 。目前使用 CPU，實際延遲需在目標 Mac 測量。
+
+图示的文字字段为空，当前应使用确认后的 center 通过坐标点击，不把图示 ID 当作文字目标。`parser_backend` 标明结果后端，`icon_detection_seconds` 记录图示阶段耗时，原 `recognition_seconds` 保留文字 OCR 耗时。此机保存截图的单次测试在暖机后约 0.41～0.46 秒完成图示侦测；不是跨设备性能保证。模型冷启动可能较慢，后台首次完成观察前返回 503。

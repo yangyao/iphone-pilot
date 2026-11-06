@@ -61,6 +61,45 @@ class OCRWorker:
             raise ObservationError(f'OCR failed: {exc}') from exc
 
 
+class HybridOCR:
+    def __init__(self, text_worker, python, model):
+        self.text_worker = text_worker
+        self.python, self.model = python, model
+        self.process = subprocess.Popen([python, str(Path(__file__).parent / 'tools/icon_worker.py'), model],
+                                        stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+
+    def __call__(self, image):
+        if self.process.poll() is not None:
+            self.process = subprocess.Popen([self.python, str(Path(__file__).parent / 'tools/icon_worker.py'), self.model],
+                                            stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        result = self.text_worker(image)
+        icon_start = time.monotonic()
+        self.process.stdin.write(base64.b64encode(image) + b'\n')
+        self.process.stdin.flush()
+        with selectors.DefaultSelector() as selector:
+            selector.register(self.process.stdout, selectors.EVENT_READ)
+            if not selector.select(120):
+                self.process.kill()
+                self.process.wait()
+                raise ObservationError('OmniParser timed out')
+        icons = json.loads(self.process.stdout.readline())
+        if 'error' in icons:
+            raise ObservationError('OmniParser: ' + icons['error'])
+        result['items'].extend(icons['items'])
+        result['icon_detection_seconds'] = round(time.monotonic() - icon_start, 4)
+        result['parser_backend'] = 'omniparser-hybrid'
+        return result
+
+    def close(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+        self.text_worker.close()
+
+
 def fetch_frame(source):
     with urlopen(source + '/frame.jpg', timeout=5) as response:
         image, headers = response.read(), response.headers
@@ -314,14 +353,19 @@ if __name__ == '__main__':
     parser.add_argument('--observation-directory', default='runtime/observations')
     parser.add_argument('--observation-interval', type=float, default=0.5)
     parser.add_argument('--retain-observations', type=int, default=1000)
+    parser.add_argument('--parser-backend', choices=('apple', 'omniparser-hybrid'), default='apple')
     args = parser.parse_args()
     if args.observation_interval < 0.1:
         parser.error('--observation-interval must be at least 0.1')
     if urlsplit(args.source).hostname not in ('127.0.0.1', 'localhost', '::1'):
         parser.error('--source must be a loopback receiver')
     worker = OCRWorker(args.ocr_binary)
+    if args.parser_backend == 'omniparser-hybrid':
+        worker = HybridOCR(worker, str(Path(__file__).parent / 'runtime/omniparser-venv/bin/python'),
+                           str(Path(__file__).parent / 'runtime/omniparser-icon.pt'))
     observer = StoredObserver(lambda: fetch_frame(args.source.rstrip('/')), worker,
-                              args.observation_directory, args.max_age,
+                              (args.observation_directory if args.parser_backend == 'apple' else
+                               args.observation_directory + '-omniparser'), args.max_age,
                               args.observation_interval, args.retain_observations)
     interaction_lock = threading.Lock()
     inputter = None if args.disable_input or args.read_only else AirTypeInput(

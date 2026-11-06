@@ -798,6 +798,7 @@ def parser():
     serve.add_argument('--board-host')
     serve.add_argument('--config', default=str(SECRETS_PATH))
     serve.add_argument('--uxplay')
+    serve.add_argument('--parser-backend', choices=('apple', 'omniparser-hybrid'))
     serve.add_argument('--lines', type=int, default=40)
     return result
 

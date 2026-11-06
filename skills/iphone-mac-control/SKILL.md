@@ -72,3 +72,7 @@ Do the task the user authorized. For product questions, ask for missing first-ha
 ### Prefer complete action results
 
 For navigation and submission, supply `--wait` / `wait_for_text` with visible destination text when known (alternatives use `|`). Reuse the returned OCR and timestamped image path for the next action. `wait.stable` confirms a settled changed layout; `wait.target_confirmed` confirms the requested text persisted. Neither `accepted` nor `changed` proves publication. Additional observe calls are for missing/incomplete/loading/timeout results, not an automatic step after every action. See `docs/action-api.md` for the settling policy.
+
+### Optional hybrid parser
+
+`parser_backend:omniparser-hybrid` adds icon boxes/centers from Microsoft OmniParser alongside Apple Vision text. Icon descriptions are currently null and clickable is unverified. Inspect the matching image to interpret an icon before tapping its center with `--xy`; icon IDs are not text targets. Switch explicitly using `./iphone serve restart --api --parser-backend omniparser-hybrid` or `--parser-backend apple`. Do not switch parsers during a pending mutation retry.

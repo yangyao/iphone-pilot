@@ -28,3 +28,9 @@ AirType (invivo, App Store ID `922932291`) is an optional separately installed t
 Arduino ESP32 core (tested 3.3.2), NimBLE-Arduino (tested 2.5.1), GStreamer and other UxPlay dependencies retain their own licenses. Install them from their upstream distributions. This source repository does not bundle their SDKs or binaries.
 
 New project contributions: Copyright (c) 2026 yangyao, GPL-3.0. Existing notices and separately granted MIT permissions remain intact.
+
+## Optional OmniParser icon detection
+
+The experimental hybrid backend downloads Microsoft OmniParser-v2.0's YOLOv8 `icon_detect/model.pt` and uses Ultralytics for local inference. The official model card identifies this detector as AGPL-3.0; the model is not bundled in this repository. The setup script installs dependencies into ignored runtime storage. Apple Vision continues to provide text OCR; no icon caption model is enabled in this version.
+
+Source and model license: https://huggingface.co/microsoft/OmniParser-v2.0 and https://github.com/microsoft/OmniParser .

@@ -37,6 +37,20 @@ Agent 操作时只传参数：优先调用 MCP 工具；当前客户端尚未加
 
 仓库也提供了可复用的操作 Skill，记录中文输入、候选词选择和操作失败后的处理经验。换一个 Agent 时，可以把这些已经走过的经验一起交给它。
 
+## 可选的图示定位
+
+混合模式将 **Apple Vision 的文字辨识**与 **Microsoft OmniParser V2 的图示侦测**合并到同一张观察结果，额外返回无文字图示的位置框、中心坐标与信心度。已在真实淘宝追评中使用侦测到的箭头坐标收起键盘，并确认发布成功。
+
+```sh
+tools/setup-omniparser.sh
+./iphone serve restart --api --parser-backend omniparser-hybrid
+./iphone observe
+# 切回纯文字解析
+./iphone serve restart --api --parser-backend apple
+```
+
+此版本提供图示位置，尚未启用自动功能描述；`description` 为 null，`clickable` 未验证。图示可能重复、漏检，或将商品整列识别为互动区域，操作前仍需结合原图确认。混合模式使用独立 SQLite 目录，权重与隔离 Python 环境不提交。完整 OCR 与图示描述模式仍在评估。[安装、结果格式与限制 →](docs/observation-api.md)
+
 ## 中文原文，一次输入
 
 写回答、填正文时，Agent 可以通过 AirType 键盘把整段中文直接送进当前输入框，保留标点、数字和英文。文字走本地网络，不经过拼音选词、跨设备剪贴板或云同步；ESP32 继续负责点击、滑动和提交。
