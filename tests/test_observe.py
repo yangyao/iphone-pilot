@@ -38,6 +38,31 @@ class ObservationTests(unittest.TestCase):
         self.assertEqual(self.calls, 1)
         self.assertEqual(len({r['observation_id'] for r in results}), 1)
 
+    def test_airtype_hint_uses_same_ocr_without_extra_recognition(self):
+        from test_airtype_input import screen
+        fixture = screen(code='012345')
+        def ocr(image):
+            self.calls += 1
+            return dict(image_sha256=hashlib.sha256(image).hexdigest(), width=498,
+                        height=fixture['height'], items=fixture['items'])
+        self.observer.ocr = ocr
+        observation = self.observer.observe()
+        self.assertEqual(observation['airtype'], dict(
+            detected=True, endpoint='http://192.168.2.140:8307', host='192.168.2.140',
+            port=8307, pairing_code='012345', connection_verified=False))
+        self.assertEqual(self.calls, 1)
+        self.observer.observe(True, observation['observation_id'])
+        self.assertEqual(self.calls, 1)
+        self.observer.max_age = -1
+        stale = self.observer.observe(observation_id=observation['observation_id'])
+        self.assertFalse(stale['airtype']['detected'])
+        self.assertIsNone(stale['airtype']['pairing_code'])
+
+    def test_no_keyboard_does_not_break_observation(self):
+        result = self.observer.observe()
+        self.assertFalse(result['airtype']['detected'])
+        self.assertIsNone(result['airtype']['pairing_code'])
+
     def test_stale_latest_rejected_and_old_pin_marked(self):
         first = self.observer.observe()
         self.observer.max_age = -1

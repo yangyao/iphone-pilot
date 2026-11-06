@@ -36,7 +36,10 @@ def api_json(request, timeout):
 
 @mcp.tool()
 def iphone_observe(include_image: bool = False, observation_id: str | None = None) -> list[TextContent | ImageContent]:
-    """Read latest iPhone text and pixel centers. Set include_image for ambiguous icons.
+    """Read latest iPhone text, pixel centers and visible AirType address/pairing code.
+
+    airtype.pairing_code is null if unreadable, ambiguous or stale; no token is exposed.
+    Set include_image for ambiguous icons.
 
     Supply a previous observation_id to inspect that SAME frame with an image.
     IDs expire from a bounded cache. stale=true means do not act on coordinates.

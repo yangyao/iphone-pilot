@@ -13,7 +13,7 @@ import threading
 import time
 from urllib.parse import parse_qs, urlsplit
 from urllib.request import ProxyHandler, build_opener
-from tools.airtype_input import AirTypeInput, InputError
+from tools.airtype_input import AirTypeInput, InputError, keyboard_connection
 
 urlopen = build_opener(ProxyHandler({})).open
 
@@ -111,6 +111,14 @@ class Observer:
                           source=dict(metadata), stale=self.stale(metadata))
             output['source']['age_seconds'] = (None if metadata.get('received_at') is None
                                                else time.time() - metadata['received_at'])
+            try:
+                keyboard, pairing_code = keyboard_connection(output)
+                endpoint = urlsplit(keyboard.base)
+                output['airtype'] = dict(detected=True, endpoint=keyboard.base,
+                                         host=endpoint.hostname, port=endpoint.port,
+                                         pairing_code=pairing_code, connection_verified=False)
+            except InputError as exc:
+                output['airtype'] = dict(detected=False, pairing_code=None, reason=str(exc))
             if output['stale'] and not include_image:
                 output['note'] = 'Stale observation; do not use coordinates for actions.'
             if include_image:

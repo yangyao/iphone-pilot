@@ -21,6 +21,8 @@ curl 'http://127.0.0.1:18766/observe?include_image=true&observation_id=PREVIOUS_
 
 默认结果为 JSON：`observation_id`（图片 SHA-256）、`width/height`、`coordinate_origin: top-left`、`items`（`id/text/box/center/confidence/clickable`）、`source`、`stale`、`cached`。`box` 是 `[x,y,width,height]`，`center` 是 `[x,y]`，单位为原图像素。编号仅在该观察内有效。`clickable:null` 表示未验证可点击性。
 
+同时从这一次 OCR 提取 `airtype`，不增加截图或识别调用。当 AirType Web Access 面板可辨认时，返回 `detected:true`、`endpoint`、`host`、`port`、`pairing_code`（字符串，保留前导零），以及 `connection_verified:false`。这只是当前画面中读到的信息，未尝试联网配对；不会返回 Token。面板未出现、连接信息有歧义或画面过期时，返回 `detected:false`、`pairing_code:null` 和原因。可识别地址但没有可读六位码时，`detected:true` 而 `pairing_code:null`，仍不能推断无需配对。
+
 HTTP 的 `include_image=true` 添加 `image: {mime_type, data}`，data 为 JPEG base64。带 `observation_id` 取回同一张图，即使手机已经翻页；最近 8 张观察保存在内存，过期返回 404。HTTP JSON 主要供程序使用，Agent 优先通过 MCP 取得真正的图片内容块。
 
 最新帧超过 5 秒或接收源停止，返回 503，不冒充实时画面。`--max-age` 可配置。缓存观察过期仍可查看，但 `stale:true` 时不能用其坐标操作。接收时间只证明 Mac 收到了帧，不能证明 AirPlay 没有冻结或应用没有卡住。新接收端提供与图像原子绑定的时间和序号；兼容旧接收端时 `source.metadata_exact:false`，时间与序号只是近似状态，图片与 OCR 仍由哈希绑定。`/health` 仅表示 API 存活，不表示手机已连接。
