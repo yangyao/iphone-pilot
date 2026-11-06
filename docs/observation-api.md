@@ -82,3 +82,5 @@ iphone_act(action="tap", observation_id="当前编号", target_id=12,
 先執行 `tools/setup-omniparser.sh` 安裝依賴與權重（可用 HTTPS_PROXY 指定既有 HTTP 代理，uv 可用 UV_DEFAULT_INDEX 指定套件鏡像）。此實驗需 `runtime/omniparser-venv/bin/python`（Python 3.12、ultralytics、pillow）及 `runtime/omniparser-icon.pt`（微軟 OmniParser-v2.0 的 icon_detect/model.pt）。依賴與權重留在忽略的 runtime 目錄，不提交。該 YOLOv8 權重按官方模型卡採 AGPL-3.0；上游來源：https://huggingface.co/microsoft/OmniParser-v2.0 。目前使用 CPU，實際延遲需在目標 Mac 測量。
 
 图示的文字字段为空，当前应使用确认后的 center 通过坐标点击，不把图示 ID 当作文字目标。`parser_backend` 标明结果后端，`icon_detection_seconds` 记录图示阶段耗时，原 `recognition_seconds` 保留文字 OCR 耗时。此机保存截图的单次测试在暖机后约 0.41～0.46 秒完成图示侦测；不是跨设备性能保证。模型冷启动可能较慢，后台首次完成观察前返回 503。
+
+本机试验后继续保留此混合模式：EasyOCR 全量替换与逐图示描述未进入操作流程，对应实验入口已移除。[解析后端实验结论](validation.md#解析后端实验结论)记录观察结果与适用边界。

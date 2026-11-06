@@ -92,7 +92,7 @@ def probe_point(observation, excluded=()):
         (.50, .90), (.50, .13), (.92, .36), (.08, .36),
     ]
     boxes = []
-    for item in observation.get('items', []):
+    for item in content_items(observation):
         box = item.get('box')
         if isinstance(box, (list, tuple)) and len(box) == 4:
             x, y, w, h = box

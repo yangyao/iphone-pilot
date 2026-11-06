@@ -49,7 +49,7 @@ tools/setup-omniparser.sh
 ./iphone serve restart --api --parser-backend apple
 ```
 
-此版本提供图示位置，尚未启用自动功能描述；`description` 为 null，`clickable` 未验证。图示可能重复、漏检，或将商品整列识别为互动区域，操作前仍需结合原图确认。混合模式使用独立 SQLite 目录，权重与隔离 Python 环境不提交。完整 OCR 与图示描述模式仍在评估。[安装、结果格式与限制 →](docs/observation-api.md)
+此版本提供图示位置，尚未启用自动功能描述；`description` 为 null，`clickable` 未验证。图示可能重复、漏检，或将商品整列识别为互动区域，操作前仍需结合原图确认。混合模式使用独立 SQLite 目录，权重与隔离 Python 环境不提交。本机实测后保留此混合方案，未采用 EasyOCR 全量替换及逐图示描述；原因与边界见[实验结论](docs/validation.md#解析后端实验结论)。[安装、结果格式与限制 →](docs/observation-api.md)
 
 ## 中文原文，一次输入
 

@@ -7,7 +7,7 @@ import threading
 import time
 import unittest
 
-from tools.action_runtime import ActionError, PhoneActions
+from tools.action_runtime import ActionError, PhoneActions, probe_point
 from tools.airtype_input import AirTypeInput, InputError
 
 
@@ -278,6 +278,14 @@ class ActionTests(unittest.TestCase):
             ('去评价', 500), (f'剩余{20-i}秒', 800)]) for i in range(12)]
         result = self.actor.act(**self.arguments)
         self.assertTrue(result['wait']['target_confirmed'])
+
+    def test_icon_region_does_not_block_nonclick_ocr_empty_probe(self):
+        observation = copy.deepcopy(BEFORE)
+        expected = probe_point(observation)
+        observation['items'].append(dict(id=99, type='icon', text='', center=[249, 540],
+                                         box=[0, 0, 498, 1080], clickable=None))
+        self.assertIsNotNone(expected)
+        self.assertEqual(probe_point(observation), expected)
 
     def test_invalid_actions_and_coordinates_do_not_send(self):
         for invalid in [dict(action='command'), dict(target_id=True), dict(timeout_ms=99999),
