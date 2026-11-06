@@ -35,7 +35,7 @@ iphone_type(text="这是一段完整的中文正文。", request_id="jd-answer-0
 
 ## HTTP 接口
 
-观察服务默认也提供 `POST http://127.0.0.1:18766/input`，JSON 参数为 `text`、`request_id`、可选 `allow_newlines`。仅接受本地客户端的 `application/json` 请求，拒绝带 Origin 的浏览器请求。可用 `python3 observe.py --disable-input` 运行只读观察服务。
+观察服务默认也提供 `POST http://127.0.0.1:18766/input`，JSON 参数为 `text`、`request_id`、可选 `allow_newlines`。仅接受本地客户端的 `application/json` 请求，拒绝带 Origin 的浏览器请求。可用 `--disable-input` 单独禁用 AirType；`--read-only` 同时禁用 AirType 与 HID 动作。
 
 ```python
 import json

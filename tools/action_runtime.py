@@ -1,0 +1,230 @@
+"""Observe-bound absolute actions, bounded state waits, deltas and timing."""
+import hashlib
+import json
+import math
+from pathlib import Path
+import re
+import threading
+import time
+
+from hardware.tools.hybrid_control import normalized as hid_coordinate
+from tools.airtype_input import normalized
+from tools.operation_journal import OperationJournal
+
+
+class ActionError(Exception):
+    def __init__(self, message, status=409):
+        super().__init__(message)
+        self.status = status
+
+
+def content_items(observation):
+    # The clock/battery row alone must not confirm navigation.
+    return [item for item in observation['items']
+            if item['center'][1] >= observation['height'] * .06 and normalized(item['text'])]
+
+
+def delta(before, after):
+    old, new = content_items(before), content_items(after)
+    remaining = list(new)
+    removed = []
+    tolerance = max(3, min(after['width'], after['height']) * .01)
+    for item in old:
+        match = next((index for index, candidate in enumerate(remaining)
+                      if normalized(candidate['text']) == normalized(item['text']) and
+                      math.dist(candidate['center'], item['center']) <= tolerance), None)
+        if match is None:
+            removed.append(item)
+        else:
+            remaining.pop(match)
+    return dict(added=remaining, removed=removed)
+
+
+def same_layout(before, after):
+    if (before['width'], before['height']) != (after['width'], after['height']):
+        return False
+    changes = delta(before, after)
+    return not changes['added'] and not changes['removed']
+
+
+class PhoneActions:
+    def __init__(self, observer, board, directory, lock=None, poll_interval=.15,
+                 monotonic=time.monotonic, wall_time=time.time, sleep=time.sleep):
+        self.observer, self.board = observer, board
+        self.lock = lock if lock is not None else threading.Lock()
+        self.journal = OperationJournal(Path(directory) / 'phone-actions.sqlite')
+        self.poll_interval = poll_interval
+        self.monotonic, self.wall_time, self.sleep = monotonic, wall_time, sleep
+
+    def act(self, *, action, observation_id, request_id, target_id=None,
+            x=None, y=None, end_x=None, end_y=None, duration_ms=400,
+            wait_for_text=None, timeout_ms=5000, changes_only=False, include_image=False):
+        start = self.monotonic()
+        self.validate(action, observation_id, request_id, target_id, x, y, end_x, end_y,
+                      duration_ms, wait_for_text, timeout_ms, changes_only, include_image)
+        # Output format can change on a retry; physical action and wait condition cannot.
+        intent = dict(action=action, observation_id=observation_id, target_id=target_id,
+                      x=x, y=y, end_x=end_x, end_y=end_y, duration_ms=duration_ms,
+                      wait_for_text=wait_for_text, timeout_ms=timeout_ms)
+        digest = hashlib.sha256(json.dumps(intent, sort_keys=True).encode()).hexdigest()
+        if not self.lock.acquire(blocking=False):
+            raise ActionError('Phone is busy; wait, then retry with the SAME request_id')
+        try:
+            previous = self.journal.get(request_id, digest)
+            if previous is not None:
+                return self.present(previous, True, changes_only, include_image)
+            pinned = self.observer.observe(observation_id=observation_id)
+            # A cached frame can be old, but must still agree with a freshly received screen.
+            board_start = self.monotonic()
+            try:
+                status = self.board.status()
+            except Exception:
+                raise ActionError('Board status unavailable; no action sent', 503) from None
+            if status.get('usb') != 'ok' or status.get('busy') or status.get('owner') == 'app':
+                raise ActionError('Board USB not ready or another controller is active; no action sent')
+            board_ms = (self.monotonic() - board_start) * 1000
+            current = self.observer.observe()
+            if current['stale']:
+                raise ActionError('Fresh frame required; no action sent')
+            exact = current['observation_id'] == observation_id
+            if not exact and (not content_items(pinned) or not same_layout(pinned, current)):
+                raise ActionError('Screen changed since that observation; observe again before acting')
+            if target_id is not None:
+                item = next((item for item in pinned['items'] if item['id'] == target_id), None)
+                if item is None:
+                    raise ActionError('target_id does not belong to that observation', 400)
+                tolerance = max(3, min(current['width'], current['height']) * .01)
+                matches = [candidate for candidate in current['items']
+                           if normalized(candidate['text']) == normalized(item['text']) and
+                           math.dist(candidate['center'], item['center']) <= tolerance]
+                if len(matches) != 1:
+                    raise ActionError('Target changed or is ambiguous; observe again before acting')
+                x, y = matches[0]['center']
+            width, height = current['width'], current['height']
+            try:
+                points = [hid_coordinate(x, width), hid_coordinate(y, height)]
+                if action == 'swipe':
+                    points.extend((hid_coordinate(end_x, width), hid_coordinate(end_y, height), duration_ms))
+            except (ValueError, TypeError):
+                raise ActionError('Coordinates must be inside the observed image', 400) from None
+            line = ('abstap' if action == 'tap' else 'absdrag') + ' ' + ' '.join(map(str, points))
+            result = dict(request_id=request_id, action=action, accepted=None, replayed=False,
+                          status='uncertain', before_observation_id=current['observation_id'],
+                          after_observation_id=None, changes=None,
+                          wait={'status': 'not_started', 'expected_text': wait_for_text},
+                          timings_ms={'precheck': round((self.monotonic() - start) * 1000, 1),
+                                      'board_status': round(board_ms, 1)})
+            previous = self.journal.claim(request_id, digest, result)
+            if previous is not None:
+                return self.present(previous, True, changes_only, include_image)
+            command_start = self.monotonic()
+            try:
+                self.board.command(line)
+            except Exception:
+                result['message'] = 'Action outcome uncertain. Inspect the phone; this request_id will not resend.'
+            else:
+                result.update(accepted=True, status='accepted')
+            result['timings_ms']['command'] = round((self.monotonic() - command_start) * 1000, 1)
+            finished_at = self.wall_time()
+            self.journal.save(request_id, digest, result)
+            if result['accepted']:
+                wait_start = self.monotonic()
+                try:
+                    outcome = self.wait(current, finished_at, wait_for_text, timeout_ms)
+                    result.update(outcome)
+                except Exception:
+                    result['wait'] = dict(status='observation_unavailable', expected_text=wait_for_text)
+                result['timings_ms']['wait'] = round((self.monotonic() - wait_start) * 1000, 1)
+            result['timings_ms']['total'] = round((self.monotonic() - start) * 1000, 1)
+            self.journal.save(request_id, digest, result)
+            return self.present(result, False, changes_only, include_image)
+        except ValueError as exc:
+            raise ActionError(str(exc)) from None
+        finally:
+            self.lock.release()
+
+    def wait(self, before, finished_at, expected, timeout_ms):
+        deadline = self.monotonic() + timeout_ms / 1000
+        last, stable, previous_received = None, None, finished_at
+        observation_ms, polls = 0., 0
+        wait_status = 'timeout'
+        error = None
+        while self.monotonic() < deadline:
+            poll_start = self.monotonic()
+            try:
+                candidate = self.observer.observe()
+            except Exception:
+                error = 'observation_unavailable'
+                break
+            observation_ms += (self.monotonic() - poll_start) * 1000
+            polls += 1
+            received = candidate.get('source', {}).get('received_at')
+            if not candidate['stale'] and received is not None and received > previous_received:
+                last = candidate
+                previous_received = received
+                changed = not same_layout(before, candidate)
+                found = expected is None or normalized(expected) in normalized(
+                    '\n'.join(item['text'] for item in content_items(candidate)))
+                if changed and found and content_items(candidate):
+                    if stable is not None and same_layout(stable, candidate):
+                        wait_status = 'condition_met' if expected is not None else 'changed'
+                        break
+                    stable = candidate
+                else:
+                    stable = None
+            # A new JPEG or a changed clock is not a changed page.
+            self.sleep(max(0, min(self.poll_interval, deadline - self.monotonic())))
+        if error:
+            wait_status = error
+        elif last is None:
+            wait_status = 'no_new_frame'
+        result = dict(wait=dict(status=wait_status, expected_text=expected, polls=polls,
+                                observation_ms=round(observation_ms, 1)),
+                      after_observation_id=None, changes=None)
+        if last is not None:
+            result['after_observation_id'] = last['observation_id']
+            result['changes'] = delta(before, last)
+        return result
+
+    def present(self, saved, replayed, changes_only, include_image):
+        result = dict(saved, replayed=replayed)
+        observation_id = result.get('after_observation_id')
+        if observation_id:
+            try:
+                observation = self.observer.observe(include_image=include_image, observation_id=observation_id)
+                if changes_only:
+                    observation.pop('items', None)
+                result['observation'] = observation
+            except Exception:
+                result['observation'] = None
+                result['observation_note'] = 'Result frame expired; call iphone_observe for the current screen'
+        return result
+
+    @staticmethod
+    def validate(action, observation_id, request_id, target_id, x, y, end_x, end_y,
+                 duration_ms, wait_for_text, timeout_ms, changes_only, include_image):
+        if action not in ('tap', 'swipe'):
+            raise ActionError('action must be tap or swipe', 400)
+        if not isinstance(observation_id, str) or not re.fullmatch(r'[0-9a-f]{64}', observation_id):
+            raise ActionError('Use the observation_id returned by iphone_observe', 400)
+        if not isinstance(request_id, str) or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,128}', request_id):
+            raise ActionError('request_id must be a unique stable identifier (1..128 ASCII characters)', 400)
+        if type(timeout_ms) is not int or not 200 <= timeout_ms <= 15000:
+            raise ActionError('timeout_ms must be 200..15000', 400)
+        if type(duration_ms) is not int or not 60 <= duration_ms <= 2000:
+            raise ActionError('duration_ms must be 60..2000', 400)
+        if wait_for_text is not None and (not isinstance(wait_for_text, str) or
+                                         not normalized(wait_for_text) or len(wait_for_text) > 500):
+            raise ActionError('wait_for_text must be nonempty text, at most 500 characters', 400)
+        if type(changes_only) is not bool or type(include_image) is not bool:
+            raise ActionError('changes_only and include_image must be booleans', 400)
+        if target_id is not None:
+            if action != 'tap' or type(target_id) is not int or target_id < 0 or any(
+                    value is not None for value in (x, y, end_x, end_y)):
+                raise ActionError('target_id is for tap only; do not mix it with coordinates', 400)
+        else:
+            points = (x, y, end_x, end_y) if action == 'swipe' else (x, y)
+            if any(type(value) not in (int, float) or not math.isfinite(value) for value in points):
+                raise ActionError('Provide finite pixel coordinates or a tap target_id', 400)
+            if action == 'tap' and (end_x is not None or end_y is not None):
+                raise ActionError('tap does not accept end coordinates', 400)

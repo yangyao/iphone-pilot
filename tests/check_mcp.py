@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import tempfile
 import threading
 import time
 
@@ -15,6 +16,7 @@ from mcp.client.stdio import stdio_client
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from observe import Observer, make_server
+from tools.action_runtime import PhoneActions
 
 
 async def check(port):
@@ -25,7 +27,7 @@ async def check(port):
         async with ClientSession(read, write) as session:
             await session.initialize()
             names = {tool.name for tool in (await session.list_tools()).tools}
-            assert names == {'iphone_observe', 'iphone_type'}
+            assert names == {'iphone_observe', 'iphone_type', 'iphone_act'}
             text = await session.call_tool('iphone_observe', {})
             assert not text.isError
             assert [part.type for part in text.content] == ['text']
@@ -42,17 +44,35 @@ async def check(port):
             response = json.loads(inserted.content[0].text)
             assert response['accepted'] and response['submitted'] is False
             assert inputter.received == ('中文文章🙂\n第二段', 'mcp-test-1', True)
+            action_arguments = dict(action='tap', observation_id=result['observation_id'],
+                                    request_id='action-test-1', target_id=0,
+                                    wait_for_text='新页面', include_image=True)
+            acted = await session.call_tool('iphone_act', action_arguments)
+            assert not acted.isError, acted
+            assert [part.type for part in acted.content] == ['text', 'image']
+            action_result = json.loads(acted.content[0].text)
+            assert action_result['accepted'] and action_result['wait']['status'] == 'condition_met'
+            assert 'image' not in action_result['observation']
+            assert base64.b64decode(acted.content[1].data) == IMAGE_AFTER
+            replayed = await session.call_tool('iphone_act', action_arguments)
+            assert json.loads(replayed.content[0].text)['replayed'] is True
+            assert len(board.commands) == 1
             expired = await session.call_tool('iphone_observe', {'observation_id': 'missing'})
             assert expired.isError
             assert 'Observation expired' in expired.content[0].text
-            print('MCP text/image/input protocol roundtrip passed')
+            print('MCP observation/image/input/action/replay protocol roundtrip passed')
 
 
 # Protocol fixture only; real OCR is exercised separately on macOS.
 IMAGE = base64.b64decode('/9j/2Q==')
-observer = Observer(lambda: (IMAGE, dict(received_at=time.time(), source_running=True)),
+IMAGE_AFTER = IMAGE + b'after'
+phase = {'changed': False}
+observer = Observer(lambda: (IMAGE_AFTER if phase['changed'] else IMAGE,
+                             dict(received_at=time.time(), source_running=True, metadata_exact=True)),
                     lambda image: dict(image_sha256=hashlib.sha256(image).hexdigest(),
-                                       width=1, height=1, items=[]))
+                                       width=1, height=1,
+                                       items=[dict(text='新页面' if image == IMAGE_AFTER else '原页面',
+                                                   center=[.5, .5], confidence=1., clickable=None)]))
 
 
 class FakeInput:
@@ -62,11 +82,30 @@ class FakeInput:
 
 
 inputter = FakeInput()
+
+
+class FakeBoard:
+    def __init__(self):
+        self.commands = []
+
+    def status(self):
+        return dict(usb='ok', busy=0, owner='none')
+
+    def command(self, line):
+        self.commands.append(line)
+        phase['changed'] = True
+        return 'ok'
+
+
+board = FakeBoard()
 if __name__ == '__main__':
-    server = make_server(observer, 0, inputter)
+    directory = tempfile.TemporaryDirectory()
+    actor = PhoneActions(observer, board, directory.name)
+    server = make_server(observer, 0, inputter, actor)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
         asyncio.run(check(server.server_port))
     finally:
         server.shutdown()
         server.server_close()
+        directory.cleanup()

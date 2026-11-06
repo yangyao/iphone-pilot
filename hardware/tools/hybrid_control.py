@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Authenticated LAN client for the local hybrid firmware. Coordinates use your image dimensions."""
 import argparse
+import ipaddress
 import json
 from pathlib import Path
 import re
@@ -12,6 +13,48 @@ def normalized(value, extent):
     if extent <= 0 or not 0 <= value < extent:
         raise ValueError('coordinate must lie inside the image')
     return round(value * 32767 / extent)
+
+
+class BoardClient:
+    """Reusable HTTP transport; commands are never automatically retried."""
+    def __init__(self, host, token, port=8766, timeout=6):
+        try:
+            address = ipaddress.ip_address(host)
+            if not address.is_private or address.is_unspecified or address.is_multicast:
+                raise ValueError('use a local board address')
+        except ValueError:
+            if not re.fullmatch(r'[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*\.local', host):
+                raise ValueError('board host must be a private IP or .local name') from None
+        if not isinstance(port, int) or not 1 <= port <= 65535:
+            raise ValueError('invalid board port')
+        if not re.fullmatch(r'[0-9a-f]+', token):
+            raise ValueError('invalid local board token')
+        host = f'[{host}]' if ':' in host else host
+        self.base, self.timeout = f'http://{host}:{port}', timeout
+        self.headers = {'Authorization': 'Bearer ' + token, 'Content-Type': 'text/plain; charset=utf-8'}
+        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+    @classmethod
+    def from_config(cls, host, config):
+        match = re.search(r'^#define HYBRID_HTTP_TOKEN "([0-9a-f]+)"$', Path(config).read_text(), re.M)
+        if not match:
+            raise ValueError('missing local HTTP token')
+        return cls(host, match[1])
+
+    def status(self):
+        request = urllib.request.Request(self.base + '/status', headers=self.headers)
+        with self.opener.open(request, timeout=self.timeout) as response:
+            return json.load(response)
+
+    def command(self, line):
+        if '\n' in line or '\r' in line or len(line.encode()) > 180:
+            raise ValueError('command must be one line, at most 180 bytes')
+        request = urllib.request.Request(self.base + '/command', data=line.encode(), headers=self.headers)
+        with self.opener.open(request, timeout=self.timeout) as response:
+            result = response.read().decode().strip()
+        if result != 'ok':
+            raise ValueError('board did not acknowledge command')
+        return result
 
 
 def main():

@@ -11,7 +11,7 @@ bash tools/build-ocr.sh
 python3 observe.py
 ```
 
-服务仅监听 `127.0.0.1:18766`，接收端默认 `18765`。OCR 子进程按需启动并常驻，超时或崩溃后在下一次请求重建；相同 JPEG 的识别结果复用。观察请求不会调用云模型或操作手机。服务默认另提供 AirType 输入，使用 `--disable-input` 可仅启用只读观察。退出服务使用 Ctrl+C。
+服务仅监听 `127.0.0.1:18766`，接收端默认 `18765`。OCR 子进程按需启动并常驻，超时或崩溃后在下一次请求重建；相同 JPEG 的识别结果复用。观察请求不会调用云模型或操作手机。服务默认另提供 AirType 输入，配置板子后还可执行动作；使用 `--read-only` 可仅启用只读观察。退出服务使用 Ctrl+C。
 
 ```sh
 curl 'http://127.0.0.1:18766/observe'
@@ -29,7 +29,7 @@ HTTP 的 `include_image=true` 添加 `image: {mime_type, data}`，data 为 JPEG 
 
 ## MCP
 
-使用官方 Python MCP SDK 的维护版 1.30.0（固定版本，避免主版本接口变化），通过 stdio 提供观察和输入两个工具：
+使用官方 Python MCP SDK 的维护版 1.30.0（固定版本，避免主版本接口变化），通过 stdio 提供观察、输入和动作三个工具：
 
 ```json
 {"mcpServers":{"iphone-pilot":{"command":"uv","args":["run","/ABSOLUTE/PATH/iphone-pilot/tools/observe_mcp.py"]}}}
@@ -41,9 +41,13 @@ HTTP 的 `include_image=true` 添加 `image: {mime_type, data}`，data 为 JPEG 
 iphone_observe()
 iphone_observe(include_image=true, observation_id="上一次返回的编号")
 iphone_type(text="需要输入的整段中文。", request_id="draft-001")
+iphone_act(action="tap", observation_id="当前编号", target_id=12,
+           request_id="open-page-001", wait_for_text="目标页面文字")
 ```
 
 普通观察调用只有文字内容块；带图时另附 MCP `ImageContent`，文字中不塞 base64。点击仍使用绝对坐标 HID；`iphone_type` 自动从已展开的 AirType 键盘读取配对信息并一次输入，详见 [中文输入](chinese-input.md)。输入不包含点击发布。不要把服务端口暴露到局域网或公网，结果包含手机屏幕内容。
+
+`iphone_act` 将点击或拖动、等待页面变化、返回 OCR 合为一次调用，支持文字条件、变化摘要和阶段耗时。板子配置及结果状态详见 [动作 API](action-api.md)。
 
 ## 操作方式与实测结论
 

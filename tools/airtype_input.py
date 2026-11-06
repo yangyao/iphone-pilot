@@ -64,7 +64,7 @@ def keyboard_connection(observation):
 
 
 class AirTypeInput:
-    def __init__(self, observer, directory, client_factory=AirType, verify_attempts=2):
+    def __init__(self, observer, directory, client_factory=AirType, verify_attempts=2, lock=None):
         self.observer, self.directory = observer, Path(directory)
         self.directory.mkdir(parents=True, exist_ok=True)
         self.journal = self.directory / 'airtype-input.sqlite'
@@ -72,7 +72,7 @@ class AirTypeInput:
         descriptor = os.open(self.journal, os.O_CREAT | os.O_WRONLY, 0o600)
         os.close(descriptor)
         self.client_factory, self.verify_attempts = client_factory, verify_attempts
-        self.lock = threading.Lock()
+        self.lock = lock if lock is not None else threading.Lock()
         with self.database() as db:
             db.execute('CREATE TABLE IF NOT EXISTS inputs '
                        '(request_id TEXT PRIMARY KEY, digest TEXT NOT NULL, result TEXT NOT NULL)')
@@ -97,7 +97,7 @@ class AirTypeInput:
             raise InputError('Line breaks require allow_newlines=true and a confirmed multiline editor', 400)
         digest = hashlib.sha256(json.dumps([text, allow_newlines], ensure_ascii=False).encode()).hexdigest()
         if not self.lock.acquire(blocking=False):
-            raise InputError('Another input is running; wait, then reuse the SAME request_id')
+            raise InputError('Phone is busy; wait, then reuse the SAME request_id')
         try:
             with self.database() as db:
                 previous = db.execute('SELECT digest, result FROM inputs WHERE request_id=?', (request_id,)).fetchone()

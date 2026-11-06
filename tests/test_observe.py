@@ -134,6 +134,23 @@ class ObservationTests(unittest.TestCase):
             server.server_close()
             thread.join()
 
+    def test_action_endpoint_requires_configuration_and_valid_arguments(self):
+        server = make_server(self.observer, 0)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            request = Request(f'http://127.0.0.1:{server.server_port}/act',
+                              data=b'{}', headers={'Content-Type': 'application/json'})
+            with self.assertRaises(HTTPError) as caught:
+                urlopen(request)
+            self.assertEqual(caught.exception.code, 503)
+            self.assertIn('--board-host', json.load(caught.exception)['error'])
+            caught.exception.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
 
 if __name__ == '__main__':
     unittest.main()
