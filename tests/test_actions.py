@@ -128,7 +128,7 @@ class ActionTests(unittest.TestCase):
 
     def test_refuses_changed_page_and_changed_page_during_board_check(self):
         self.board.on_status = lambda: setattr(self.observer, 'current', copy.deepcopy(AFTER))
-        with self.assertRaisesRegex(ActionError, 'Screen changed'):
+        with self.assertRaisesRegex(ActionError, 'Target changed or is ambiguous'):
             self.actor.act(**self.arguments)
         self.assertEqual(self.board.commands, [])
 

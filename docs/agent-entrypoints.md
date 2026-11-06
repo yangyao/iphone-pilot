@@ -42,14 +42,26 @@ MCP/CLI 默认返回精简文字结果：保留 ID、文字、中心、置信度
 ./iphone status
 ./iphone observe
 ./iphone observe --include-image
-./iphone tap 12 --id p1 --wait 发布 --include-image
+./iphone tap 12 --id p1 --wait 完成 --include-image
 ./iphone tap --xy 378 296 --id stars1 --timeout 2000
 ./iphone swipe 250 850 250 350 --id scroll1 --ms 300
 ./iphone type --id t1 --text-file runtime/draft.txt --include-image
 ./iphone image
+./iphone wait '成功|完成|OK' --timeout 8000
+./iphone wait 空格 --gone --timeout 4000
+./iphone dismiss --id kb1
+./iphone pixel --xy 379 456
 ```
 
+`tap/swipe` 坐标参数两用：`tap 421 655`（两个位置参数）与 `tap --xy 421 655` 等价；单值位置参数仍指条目编号（`tap 12`）。`wait` 只轮询 OCR，不发送物理动作，`--gone` 反转为等待文本消失，文本支持 `|` 分隔的多个候选；`--include-result` 附上最终观察。`dismiss` 自动寻找键盘上方的收起箭头点击并验证键盘消失，失败时报错而非盲点。`pixel` 从最近帧采样指定坐标的平均颜色（OCR 空间坐标），用于 OCR 无法判断的控件状态（选中/未选中、开关、评级等）。
+
 `--include-image` 会在同一次 API 调用中取得对应帧；CLI 将图片写入本地 JPEG，并返回 `image_file`，MCP 则附加图片内容块。默认不带图片。需要视觉核对时才打开/查看它；若只是读文字与坐标，使用默认输出即可。可用 `--image-output PATH` 指定 CLI 图片路径。
+
+`pixel` 支持多点：`./iphone pixel --xy x1 y1 x2 y2 x3 y3` 一次抓帧采样多个点，返回 `samples` 数组；单点时结果直接平铺在顶层。采样点若靠近上一次点击的位置（光标停留处会压暗颜色），结果带 `near_last_tap` 警告，此时应交叉核对同类相邻元素而不是重拍，也不要点击"空白处"挪开光标——表单页面上任何坐标都可能是活动控件。加 `--compare R G B [R G B ...] [--tolerance 60]` 后每个采样点带 `filled` 与 `distance`：选中/激活色随 app 主题而不同，不要假设固定值，先在已知选中状态采样，或传入多组参考色让 `filled` 匹配任一。
+
+`taps` 支持一次调用顺序多点：`./iphone taps --id s1 --xy x1 y1 x2 y2 --expect 锚点文本`。`--expect` 是必填的防盲发锚点：当前帧上找不到该文本时拒绝执行任何点击，防止复合动作在过期页面上误发。
+
+基础设施排障全部收敛在 CLI 下（均为只读，token 留在服务端不出命令行）：`./iphone health` 看观察 API 的动作/输入可用性；点击全部无效但观察正常时，通常是动作被禁用或板子 IP 变了。`./iphone board discover --save` 并发探测局域网 HID 桥端口（自动排除回环/链路本地/代理 fake-ip 网段），把找到的板子 IP 存入 `runtime/board.json`；`./iphone board status [--host IP]` 直连板子返回固件/USB/网络原始状态；随后 `tools/serve.sh [BOARD_IP]` 一键重启接收端与观察 API（可用 `UXPLAY_BIN`、`SECRETS` 环境变量覆盖路径）。`./iphone receiver` 一次返回接收端帧状态与观察 API 健康。`dismiss` 自动收起键盘，按顺序尝试三种策略并逐一验证：app 自带的收起箭头 → AirType 面板的 ✕ 关闭按钮 → 内容区小幅滚动触发失焦；全部失败才报错（不再要求页面必须有箭头）。`tap --retry N` 用于画面持续变化的页面（如相机取景）：动作因页面不稳定被拒时自动重新观察并以子编号重试，被拒的尝试不会发送任何物理动作；它也覆盖"点击被接受但毫无效果"的情况——只有当当前帧与点击前布局一致（页面没有反应）且 `--wait` 文本始终未出现时才重发，页面已变化则绝不多点。`type` 的 `not_confirmed` 会跨行拼接所有 OCR 文本后复查插入前缀（文本换行显示不影响判定）。`./iphone scroll --id s1 --until '立即评价'` 反复滚动直到目标文本出现（浮动横幅遮挡控件、长列表找按钮的场景），支持 `--gone`/`--max`/`--dir`，未找到则超时返回并保留最终观察。
 
 以上是独立用法示例，不是一组应当盲目批量执行的手机动作。`tap/swipe` 自动使用本 CLI 上一次见到的观察编号，并由服务再次核对页面，因此不用抄写 64 位哈希、地址、宽高或 HTTP JSON。需要明确指定画面时使用 `--from OBSERVATION_ID`。未知或变化的页面仍要重新观察。
 

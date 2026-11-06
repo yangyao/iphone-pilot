@@ -106,7 +106,8 @@ class ShortClientTests(unittest.TestCase):
         path = Path(self.directory.name) / 'draft.txt'
         path.write_text(text)
         self.invoke('type', '--text-file', str(path), '--allow-newlines', '--id', 'input-1')
-        self.assertEqual(self.api.calls[-1], ('/input', dict(text=text, request_id='input-1', allow_newlines=True)))
+        self.assertEqual(self.api.calls[-1], ('/input', dict(text=text, request_id='input-1',
+                                                             allow_newlines=True, include_image=False)))
 
     def test_image_matches_frame_and_is_written_privately(self):
         first = self.invoke('observe')
@@ -135,7 +136,7 @@ class ShortClientTests(unittest.TestCase):
         self.assertEqual(result['items'][0]['id'], 12)
         self.assertNotIn('box', result['items'][0])
         self.assertFalse(result['stale'])
-        self.assertIn('source', result)
+        self.assertNotIn('source', result)  # source diagnostics only in full mode
         self.assertIn('airtype', result)
 
     def test_without_observation_or_while_busy_no_mutation_is_sent(self):
