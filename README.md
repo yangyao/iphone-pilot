@@ -1,5 +1,7 @@
 <h1 align="center">iPhone Pilot</h1>
 
+[English](README.en.md) | 简体中文
+
 <p align="center"><strong>让 Agent 用上你的 iPhone。</strong></p>
 
 <p align="center">
